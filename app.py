@@ -33,12 +33,35 @@ def fetch_option_chain(symbol="NIFTY"):
         return [], [], 0
 
 # -------------------------------
+# Simulated RSI & Support/Resistance
+# -------------------------------
+def get_market_indicators(symbol, spot_price):
+    rsi = random.randint(25, 75)
+    support = spot_price - 100
+    resistance = spot_price + 100
+    return rsi, support, resistance
+
+# -------------------------------
+# Entry Validation Logic
+# -------------------------------
+def is_valid_entry(rsi, spot_price, decay_side, support, resistance):
+    if decay_side == "PE" and spot_price > support:
+        return False
+    if decay_side == "CE" and spot_price < resistance:
+        return False
+    if rsi < 30 and decay_side == "PE":
+        return False
+    if rsi > 70 and decay_side == "CE":
+        return False
+    return True
+
+# -------------------------------
 # Confidence Score Logic
 # -------------------------------
 def calculate_confidence(row, spot_price):
     decay_score = 30 if row["Decay Side"] == "PE" else 30 if row["Decay Side"] == "CE" else 10
     price_zone_score = 30 if abs(row["Strike Price"] - spot_price) <= 100 else 10
-    volume_score = random.randint(20, 40)  # Simulated volume confidence
+    volume_score = random.randint(20, 40)
     return decay_score + price_zone_score + volume_score
 
 def generate_strategy(row):
@@ -111,6 +134,7 @@ chain_data, expiry_list, spot_price = fetch_option_chain(symbol)
 if not chain_data:
     st.stop()
 
+rsi, support_level, resistance_level = get_market_indicators(symbol, spot_price)
 df = process_data(chain_data, spot_price)
 
 # Timestamp in IST
@@ -127,6 +151,7 @@ st.markdown(f"""
 **Spot Price:** `{spot_price}`  
 **Expiry:** `{expiry_list[0]}`  
 **Decay Bias:** `{active_bias} Decay Active`  
+📉 **RSI:** `{rsi}`  
 🕒 **Last Updated:** {timestamp}
 """)
 
@@ -142,26 +167,31 @@ st.dataframe(high_df[["Strike Price", "Decay Side", "Confidence Score", "Strateg
 # -------------------------------
 st.subheader("📌 Strategy Recommendations")
 
-if active_bias == "PE":
-    st.markdown("""
+if not is_valid_entry(rsi, spot_price, active_bias, support_level, resistance_level):
+    st.warning("⚠️ Market conditions not aligned with decay bias. Avoid entry.")
+else:
+    if active_bias == "PE":
+        st.markdown("""
 #### 🔴 Bearish Bias (Downside)
 - Put options are decaying faster than calls.
+- RSI confirms bearish zone.
 - Consider strategies:
     - 📌 Bear Put Spread
     - 📌 Long Put
     - 📌 CE Shorting (if CE IV is high)
 """)
-elif active_bias == "CE":
-    st.markdown("""
+    elif active_bias == "CE":
+        st.markdown("""
 #### 🟢 Bullish Bias (Upside)
 - Call options are decaying faster than puts.
+- RSI confirms bullish zone.
 - Consider strategies:
     - 📌 Bull Call Spread
     - 📌 Long Call
     - 📌 PE Shorting (if PE IV is high)
 """)
-else:
-    st.markdown("""
+    else:
+        st.markdown("""
 #### 🟡 Neutral Bias (Range-bound)
 - Low decay on both CE and PE.
 - Consider strategies:

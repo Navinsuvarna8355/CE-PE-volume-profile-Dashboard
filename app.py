@@ -44,20 +44,37 @@ if "auto_tuner" not in st.session_state:
     st.session_state.auto_tuner = {"rsi_min": 30, "rsi_max": 70}
 
 # -------------------------------
+# Strategy Recommendation Logic
+# -------------------------------
+def recommend_strategy(signal):
+    if signal["bias"] == "Bullish" and "Bullish" in signal["ema"] and signal["pcr"] < 1:
+        return "Bull Call Spread"
+    elif signal["bias"] == "Bearish" and "Bearish" in signal["ema"] and signal["pcr"] > 1:
+        return "Bear Put Spread"
+    elif signal["bias"] == "Neutral" and signal["candle"] == "Doji" and 45 <= signal["rsi"] <= 55:
+        return "Iron Condor"
+    elif signal["rsi"] > 65 and signal["candle"] == "Bullish":
+        return "Directional CE Buy"
+    elif signal["rsi"] < 35 and signal["candle"] == "Bearish":
+        return "Directional PE Buy"
+    else:
+        return "No Clear Strategy"
+
+# -------------------------------
 # Tactical Signal Engine
 # -------------------------------
 def generate_signal():
     bias = random.choice(["Bullish", "Bearish", "Neutral"])
     ema_crossover = random.choice(["Bullish Crossover", "Bearish Crossover", "No Signal"])
     pcr = round(random.uniform(0.6, 1.4), 2)
-    candle = random.choice(["Hammer", "Doji", "Engulfing", "None"])
+    candle = random.choice(["Hammer", "Doji", "Engulfing", "Bullish", "Bearish"])
     spot = random.randint(54000, 54500)
     rsi = random.randint(st.session_state.auto_tuner["rsi_min"], st.session_state.auto_tuner["rsi_max"])
 
     trap_trade = (bias == "Bullish" and pcr > 1.2 and candle == "Doji") or \
                  (bias == "Bearish" and pcr < 0.8 and candle == "Hammer")
 
-    return {
+    signal = {
         "bias": bias,
         "ema": ema_crossover,
         "pcr": pcr,
@@ -66,6 +83,8 @@ def generate_signal():
         "rsi": rsi,
         "trap": trap_trade
     }
+    signal["strategy"] = recommend_strategy(signal)
+    return signal
 
 # -------------------------------
 # Trade Logging Function
@@ -86,6 +105,7 @@ def log_trade(signal, result, points):
         "Candle": signal["candle"],
         "Spot": signal["spot"],
         "Trap": signal["trap"],
+        "Strategy": signal["strategy"],
         "Result": result,
         "Points": points
     })
@@ -108,6 +128,7 @@ PCR: {signal['pcr']}
 RSI: {signal['rsi']}  
 Candle: {signal['candle']}  
 Spot: {signal['spot']}  
+Strategy: {signal['strategy']}  
 Trap Trade: {'Yes' if signal['trap'] else 'No'}  
 Lot Size: {LOT_SIZE} | Capital: ₹{CAPITAL}  
 Time: {entry_time}
@@ -143,4 +164,4 @@ if st.button("🔫 Generate Tactical Signal"):
     result = random.choice(["Win", "Loss"])
     points = random.randint(60, 120) if result == "Win" else random.randint(-80, -30)
     log_trade(signal, result, points)
-    st.success("Signal generated, trade logged, and alert sent!")
+    st.success("Signal generated, strategy recommended, trade logged, and alert sent!")

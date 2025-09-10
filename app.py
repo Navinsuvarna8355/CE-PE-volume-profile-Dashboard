@@ -14,7 +14,7 @@ CAPITAL = 10000
 LOT_SIZE = 1
 
 st.set_page_config(page_title="Sniper Dashboard", layout="wide")
-st.title("🎯 Sniper Entry Dashboard – Phase 2")
+st.title("🎯 Sniper Entry Dashboard – Tactical Mode")
 
 # -------------------------------
 # Telegram Alert Function
@@ -44,17 +44,48 @@ if "auto_tuner" not in st.session_state:
     st.session_state.auto_tuner = {"rsi_min": 30, "rsi_max": 70}
 
 # -------------------------------
+# Tactical Signal Engine
+# -------------------------------
+def generate_signal():
+    bias = random.choice(["Bullish", "Bearish", "Neutral"])
+    ema_crossover = random.choice(["Bullish Crossover", "Bearish Crossover", "No Signal"])
+    pcr = round(random.uniform(0.6, 1.4), 2)
+    candle = random.choice(["Hammer", "Doji", "Engulfing", "None"])
+    spot = random.randint(54000, 54500)
+    rsi = random.randint(st.session_state.auto_tuner["rsi_min"], st.session_state.auto_tuner["rsi_max"])
+
+    trap_trade = (bias == "Bullish" and pcr > 1.2 and candle == "Doji") or \
+                 (bias == "Bearish" and pcr < 0.8 and candle == "Hammer")
+
+    return {
+        "bias": bias,
+        "ema": ema_crossover,
+        "pcr": pcr,
+        "candle": candle,
+        "spot": spot,
+        "rsi": rsi,
+        "trap": trap_trade
+    }
+
+# -------------------------------
 # Trade Logging Function
 # -------------------------------
-def log_trade(entry_time, exit_time, bias, strike, rsi, candle, strategy, result, points):
+def log_trade(signal, result, points):
+    ist = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(ist)
+    entry_time = now.strftime("%d-%b %I:%M %p")
+    exit_time = now.strftime("%d-%b %I:%M %p")
+
     st.session_state.trade_journal.append({
         "Entry": entry_time,
         "Exit": exit_time,
-        "Bias": bias,
-        "Strike": strike,
-        "RSI": rsi,
-        "Candle": candle,
-        "Strategy": strategy,
+        "Bias": signal["bias"],
+        "EMA": signal["ema"],
+        "PCR": signal["pcr"],
+        "RSI": signal["rsi"],
+        "Candle": signal["candle"],
+        "Spot": signal["spot"],
+        "Trap": signal["trap"],
         "Result": result,
         "Points": points
     })
@@ -68,8 +99,23 @@ def log_trade(entry_time, exit_time, bias, strike, rsi, candle, strategy, result
         st.session_state.auto_tuner["rsi_min"] = max(25, st.session_state.auto_tuner["rsi_min"] - 1)
         st.session_state.auto_tuner["rsi_max"] = min(75, st.session_state.auto_tuner["rsi_max"] + 1)
 
+    # Telegram Alert
+    alert_msg = f"""
+🎯 *Entry Signal – BankNifty*  
+Bias: {signal['bias']}  
+EMA: {signal['ema']}  
+PCR: {signal['pcr']}  
+RSI: {signal['rsi']}  
+Candle: {signal['candle']}  
+Spot: {signal['spot']}  
+Trap Trade: {'Yes' if signal['trap'] else 'No'}  
+Lot Size: {LOT_SIZE} | Capital: ₹{CAPITAL}  
+Time: {entry_time}
+"""
+    send_telegram_alert(alert_msg)
+
 # -------------------------------
-# Display Panels
+# UI Panels
 # -------------------------------
 st.subheader("📘 Trade Journal")
 if st.session_state.trade_journal:
@@ -90,34 +136,11 @@ rsi_max = st.session_state.auto_tuner["rsi_max"]
 st.markdown(f"**RSI Thresholds:** `{rsi_min}` to `{rsi_max}`")
 
 # -------------------------------
-# Simulated Trade Trigger
+# Trade Trigger
 # -------------------------------
-if st.button("🔫 Simulate Trade"):
-    ist = pytz.timezone("Asia/Kolkata")
-    now = datetime.now(ist)
-    entry_time = now.strftime("%d-%b %I:%M %p")
-    exit_time = now.strftime("%d-%b %I:%M %p")
-    bias = random.choice(["PE", "CE"])
-    strike = random.choice([54200, 54300, 54400])
-    rsi = random.randint(rsi_min, rsi_max)
-    candle = random.choice(["Doji", "Hammer", "Engulfing", "Bullish", "Bearish"])
-    strategy = "Bear Put Spread" if bias == "PE" else "Bull Call Spread"
+if st.button("🔫 Generate Tactical Signal"):
+    signal = generate_signal()
     result = random.choice(["Win", "Loss"])
     points = random.randint(60, 120) if result == "Win" else random.randint(-80, -30)
-
-    log_trade(entry_time, exit_time, bias, strike, rsi, candle, strategy, result, points)
-
-    alert_msg = f"""
-🎯 *Entry Signal – BankNifty*  
-Bias: {bias} Decay Active  
-Strike: {strike}  
-RSI: {rsi}  
-Candle: {candle}  
-Strategy: {strategy}  
-SL: {strike + 100 if bias == 'PE' else strike - 100}  
-Target: {strike - 150 if bias == 'PE' else strike + 150}  
-Lot Size: {LOT_SIZE} | Capital: ₹{CAPITAL}  
-Time: {entry_time}
-"""
-    send_telegram_alert(alert_msg)
-    st.success("Trade logged and alert sent!")
+    log_trade(signal, result, points)
+    st.success("Signal generated, trade logged, and alert sent!")

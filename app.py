@@ -39,7 +39,9 @@ def get_market_indicators(symbol, spot_price):
     rsi = random.randint(25, 75)
     support = spot_price - 100
     resistance = spot_price + 100
-    return rsi, support, resistance
+    candle_type = random.choice(["bullish", "bearish", "doji", "hammer", "engulfing"])
+    momentum_drop = random.choice([True, False])
+    return rsi, support, resistance, candle_type, momentum_drop
 
 # -------------------------------
 # Entry Validation Logic
@@ -54,6 +56,16 @@ def is_valid_entry(rsi, spot_price, decay_side, support, resistance):
     if rsi > 70 and decay_side == "CE":
         return False
     return True
+
+# -------------------------------
+# Exit Signal Logic
+# -------------------------------
+def should_exit_trade(candle_type, momentum_drop, current_hour, spot_price, resistance):
+    if candle_type in ["doji", "hammer", "engulfing"] and momentum_drop:
+        return True
+    if current_hour >= 13 and spot_price > resistance:
+        return True
+    return False
 
 # -------------------------------
 # Confidence Score Logic
@@ -134,12 +146,14 @@ chain_data, expiry_list, spot_price = fetch_option_chain(symbol)
 if not chain_data:
     st.stop()
 
-rsi, support_level, resistance_level = get_market_indicators(symbol, spot_price)
+rsi, support_level, resistance_level, candle_type, momentum_drop = get_market_indicators(symbol, spot_price)
 df = process_data(chain_data, spot_price)
 
 # Timestamp in IST
 ist = pytz.timezone("Asia/Kolkata")
-timestamp = datetime.now(ist).strftime("%A, %d %B %Y • %I:%M %p")
+now = datetime.now(ist)
+timestamp = now.strftime("%A, %d %B %Y • %I:%M %p")
+current_hour = now.hour
 
 # -------------------------------
 # Display Header Info
@@ -152,6 +166,7 @@ st.markdown(f"""
 **Expiry:** `{expiry_list[0]}`  
 **Decay Bias:** `{active_bias} Decay Active`  
 📉 **RSI:** `{rsi}`  
+🕯️ **Candle Type:** `{candle_type}`  
 🕒 **Last Updated:** {timestamp}
 """)
 
@@ -199,6 +214,19 @@ else:
     - 📌 Straddle
     - 📌 Butterfly Spread
 """)
+
+# -------------------------------
+# Exit Signal Log
+# -------------------------------
+st.subheader("📤 Exit Signal Log")
+if should_exit_trade(candle_type, momentum_drop, current_hour, spot_price, resistance_level):
+    st.warning(f"""
+⏱️ Time: {timestamp}  
+📉 Reason: Reversal candle + momentum drop + spot breakout  
+✅ Action: Exit trade / Avoid fresh entry
+""")
+else:
+    st.success("✅ No exit signal triggered. Trade bias still valid.")
 
 # -------------------------------
 # Footer

@@ -171,12 +171,12 @@ current_hour = now.hour
 active_bias = df["Decay Side"].value_counts().idxmax()
 
 st.markdown(f"""
-**Symbol:** `{symbol}`  
-**Spot Price:** `{spot_price}`  
-**Expiry:** `{expiry_list[0]}`  
-**Decay Bias:** `{active_bias} Decay Active`  
-📉 **RSI:** `{rsi}`  
-🕯️ **Candle Type:** `{candle_type}`  
+**Symbol:** `{symbol}`  
+**Spot Price:** `{spot_price}`  
+**Expiry:** `{expiry_list[0]}`  
+**Decay Bias:** `{active_bias} Decay Active`  
+📉 **RSI:** `{rsi}`  
+🕯️ **Candle Type:** `{candle_type}`  
 🕒 **Last Updated:** {timestamp}
 """)
 
@@ -231,8 +231,8 @@ else:
 st.subheader("📤 Exit Signal Log")
 if should_exit_trade(candle_type, momentum_drop, current_hour, spot_price, resistance_level):
     st.warning(f"""
-⏱️ Time: {timestamp}  
-📉 Reason: Reversal candle + momentum drop + spot breakout  
+⏱️ Time: {timestamp}  
+📉 Reason: Reversal candle + momentum drop + spot breakout  
 ✅ Action: Exit trade / Avoid fresh entry
 """)
 else:

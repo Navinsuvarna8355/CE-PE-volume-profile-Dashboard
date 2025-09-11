@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import random
 import requests
+import calendar
 
 # -------------------------------
 # Configurations
@@ -30,14 +31,22 @@ def fetch_spot(symbol, fallback):
         return fallback
 
 # -------------------------------
+# Expiry Calculator (Last Tuesday of Month)
+# -------------------------------
+def get_last_tuesday(year, month):
+    last_day = calendar.monthrange(year, month)[1]
+    for day in range(last_day, 0, -1):
+        date = datetime(year, month, day)
+        if date.weekday() == 1:  # Tuesday
+            return date
+    return datetime(year, month, last_day)
+
+# -------------------------------
 # Inputs
 # -------------------------------
-col_exp1, col_exp2 = st.columns(2)
-with col_exp1:
-    expiry_bn = st.date_input("📅 Bank Nifty Expiry", value=datetime(2025, 9, 18))
-with col_exp2:
-    expiry_nf = st.date_input("📅 Nifty Expiry", value=datetime(2025, 9, 19))
-
+today = datetime.now()
+expiry_bn = get_last_tuesday(today.year, today.month)
+expiry_nf = get_last_tuesday(today.year, today.month)
 send_alert = st.checkbox("📲 Send Telegram Alert")
 
 spot_bn = fetch_spot("BANKNIFTY", fallback=44850.25)

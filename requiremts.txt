@@ -6,6 +6,7 @@ matplotlib>=3.7.2
 yfinance>=0.2.36
 requests>=2.31.0
 pytz>=2023.3
+matplotlib>=3.7.2
 
 
 

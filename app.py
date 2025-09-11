@@ -53,7 +53,7 @@ spot_bn = fetch_spot("BANKNIFTY") or 44850.25
 spot_nf = fetch_spot("NIFTY") or 24948.25
 
 # -------------------------------
-# Option Chain Scraper
+# Option Chain from NSE
 # -------------------------------
 def fetch_option_chain(symbol):
     url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
@@ -88,8 +88,47 @@ def fetch_option_chain(symbol):
     except:
         return pd.DataFrame()
 
+# -------------------------------
+# Yahoo Finance Fallback
+# -------------------------------
+def fetch_yahoo_chain(symbol):
+    url = f"https://query2.finance.yahoo.com/v7/finance/options/{symbol}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        r = requests.get(url, headers=headers)
+        data = r.json()["optionChain"]["result"][0]["options"][0]
+        rows = []
+        for ce, pe in zip(data.get("calls", []), data.get("puts", [])):
+            strike = ce.get("strike", 0)
+            ce_oi = ce.get("openInterest", 0)
+            pe_oi = pe.get("openInterest", 0)
+            ce_change = ce.get("change", 0)
+            pe_change = pe.get("change", 0)
+            ce_ratio = round(ce_change / ce_oi, 2) if ce_oi else 0
+            pcr = round(pe_oi / ce_oi, 2) if ce_oi else 0
+            decay = "PE" if pe_change > ce_change else "CE"
+            rows.append({
+                "Strike Price": strike,
+                "P/C Ratio": pcr,
+                "CE Ratio": ce_ratio,
+                "CE Change": ce_change,
+                "PE Change": pe_change,
+                "Decay Rate": decay
+            })
+        return pd.DataFrame(rows)
+    except:
+        return pd.DataFrame()
+
+# -------------------------------
+# Fetch with Fallback
+# -------------------------------
 df_bn = fetch_option_chain("BANKNIFTY")
+if df_bn.empty or df_bn["CE Change"].sum() == 0:
+    df_bn = fetch_yahoo_chain("^NSEBANK")
+
 df_nf = fetch_option_chain("NIFTY")
+if df_nf.empty or df_nf["CE Change"].sum() == 0:
+    df_nf = fetch_yahoo_chain("^NSEI")
 
 # -------------------------------
 # Bias Detection

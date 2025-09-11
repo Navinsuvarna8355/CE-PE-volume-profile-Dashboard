@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 from datetime import datetime
 import pytz
 import random
@@ -11,12 +11,7 @@ import random
 # -------------------------------
 BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
 CHANNEL_ID = "@navinnsuvarna"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 st.set_page_config(page_title="Dual Decay Analyzer", layout="wide")
 st.title("📉 Decay Bias Analyzer – Bank Nifty & Nifty")
@@ -39,10 +34,10 @@ def fetch_spot(symbol):
 expiry_date = st.date_input("📅 Expiry Date", value=datetime(2025, 9, 18))
 send_alert = st.checkbox("📲 Send Telegram Alert")
 
-spot_bn = fetch_spot("BANKNIFTY")
-spot_nf = fetch_spot("NIFTY")
+spot_banknifty = fetch_spot("BANKNIFTY")
+spot_nifty = fetch_spot("NIFTY")
 
-if not spot_bn or not spot_nf:
+if not spot_banknifty or not spot_nifty:
     st.error("⚠️ Failed to fetch live spot prices. Try again later.")
     st.stop()
 
@@ -68,8 +63,8 @@ def generate_theta_table(spot):
         ce_thetas.append((strike, ce_theta))
     return pd.DataFrame(data), ce_thetas
 
-df_bn, chart_bn = generate_theta_table(spot_bn)
-df_nf, chart_nf = generate_theta_table(spot_nf)
+df_bn, chart_bn = generate_theta_table(spot_banknifty)
+df_nf, chart_nf = generate_theta_table(spot_nifty)
 
 # -------------------------------
 # Bias Detection
@@ -107,13 +102,13 @@ if send_alert:
 📉 *Decay Bias Analyzer*  
 Expiry: {expiry_date.strftime('%d-%b-%Y')}  
 🟦 Bank Nifty  
-Spot: {spot_bn}  
+Spot: {spot_banknifty}  
 Bias: {bias_bn}  
 Strategy:  
 {strategy_bn}  
 
 🟥 Nifty  
-Spot: {spot_nf}  
+Spot: {spot_nifty}  
 Bias: {bias_nf}  
 Strategy:  
 {strategy_nf}  
@@ -133,11 +128,14 @@ Strategy:
 # Chart Plotter
 # -------------------------------
 def plot_theta_chart(data, title):
+    fig, ax = plt.subplots()
     strikes, ce_values = zip(*data)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=strikes, y=ce_values, mode='lines+markers', name='CE Theta', line=dict(color='blue')))
-    fig.update_layout(title=title, xaxis_title="Strike Price", yaxis_title="CE Theta", template="plotly_white")
-    st.plotly_chart(fig, use_container_width=True)
+    ax.plot(strikes, ce_values, marker='o', color='blue')
+    ax.set_title(title)
+    ax.set_xlabel("Strike Price")
+    ax.set_ylabel("CE Theta")
+    ax.grid(True)
+    st.pyplot(fig)
 
 # -------------------------------
 # Display Panels
@@ -147,7 +145,7 @@ st.markdown(f"### ⏱️ Last updated at `{timestamp}`")
 tab_bn, tab_nf = st.tabs(["🟦 Bank Nifty", "🟥 Nifty"])
 
 with tab_bn:
-    st.markdown(f"**Spot:** `{spot_bn}`")
+    st.markdown(f"**Spot:** `{spot_banknifty}`")
     st.markdown(f"**Decay Bias:** `{bias_bn}`")
     st.subheader("📊 Data Table")
     st.dataframe(df_bn, use_container_width=True)
@@ -157,7 +155,7 @@ with tab_bn:
     st.markdown(strategy_bn)
 
 with tab_nf:
-    st.markdown(f"**Spot:** `{spot_nf}`")
+    st.markdown(f"**Spot:** `{spot_nifty}`")
     st.markdown(f"**Decay Bias:** `{bias_nf}`")
     st.subheader("📊 Data Table")
     st.dataframe(df_nf, use_container_width=True)

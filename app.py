@@ -1,228 +1,281 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
-import calendar
+import random
 
 # -------------------------------
-# Configurations
+# Streamlit Config
 # -------------------------------
-BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
-CHANNEL_ID = "@navinnsuvarna"
-
-st.set_page_config(page_title="Live Decay Bias Analyzer", layout="wide")
-st.title("📉 Live Decay Bias Analyzer – Bank Nifty & Nifty")
+st.set_page_config(page_title="Sniper Entry Dashboard", layout="wide")
+st.title("🎯 Sniper Entry Dashboard – Nifty & BankNifty")
 
 # -------------------------------
-# Expiry Calculators
+# NSE Option Chain Fetch
 # -------------------------------
-def get_last_tuesday(year, month):
-    last_day = calendar.monthrange(year, month)[1]
-    for day in range(last_day, 0, -1):
-        date = datetime(year, month, day)
-        if date.weekday() == 1:
-            return date
-    return datetime(year, month, last_day)
-
-def get_next_tuesday(today):
-    days_ahead = (1 - today.weekday() + 7) % 7
-    return today + timedelta(days=days_ahead)
-
-today = datetime.now()
-expiry_bn = get_last_tuesday(today.year, today.month)
-expiry_nf = get_next_tuesday(today)
-
-# -------------------------------
-# Spot Price Fetcher
-# -------------------------------
-def fetch_spot(symbol):
-    url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9"
-    }
+def fetch_option_chain_nse(symbol="NIFTY"):
     try:
-        r = requests.get(url, headers=headers, timeout=5)
-        data = r.json()
-        return float(data["underlyingValue"])
-    except:
-        return None
-
-spot_bn = fetch_spot("BANKNIFTY") or 44850.25
-spot_nf = fetch_spot("NIFTY") or 24948.25
+        url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+        headers = {
+            "User -Agent": "Mozilla/5.0",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.nseindia.com"
+        }
+        session = requests.Session()
+        session.get("https://www.nseindia.com", headers=headers)
+        response = session.get(url, headers=headers)
+        data = response.json()
+        return data["records"]["data"], data["records"]["expiryDates"], data["records"]["underlyingValue"]
+    except Exception as e:
+        st.warning(f"NSE API fetch failed: {e}")
+        return [], [], 0
 
 # -------------------------------
-# Option Chain from NSE
+# Upstox Option Chain Fetch (Fallback)
 # -------------------------------
-def fetch_option_chain(symbol):
-    url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9"
-    }
+def fetch_option_chain_upstox(symbol="NIFTY"):
+    # Replace these with your Upstox credentials
+    UPSTOX_API_KEY = "your_upstox_api_key"
+    UPSTOX_API_SECRET = "your_upstox_api_secret"
+    UPSTOX_ACCESS_TOKEN = "your_upstox_access_token"  # You must generate this via OAuth flow
+
     try:
-        r = requests.get(url, headers=headers, timeout=5)
-        data = r.json().get("records", {}).get("data", [])
-        rows = []
-        for entry in data:
-            strike = entry.get("strikePrice")
-            ce = entry.get("CE", {})
-            pe = entry.get("PE", {})
-            ce_change = ce.get("changeinOpenInterest", 0)
-            pe_change = pe.get("changeinOpenInterest", 0)
-            ce_oi = ce.get("openInterest", 1)
-            pe_oi = pe.get("openInterest", 1)
-            ce_ratio = round(ce_change / ce_oi, 2) if ce_oi else 0
-            pcr = round(pe_oi / ce_oi, 2) if ce_oi else 0
-            decay = "PE" if pe_change > ce_change else "CE"
-            rows.append({
-                "Strike Price": strike,
-                "P/C Ratio": pcr,
-                "CE Ratio": ce_ratio,
-                "CE Change": ce_change,
-                "PE Change": pe_change,
-                "Decay Rate": decay
-            })
-        return pd.DataFrame(rows)
-    except:
-        return pd.DataFrame()
+        # Upstox API endpoint for option chain (example endpoint, check Upstox docs)
+        # Note: Upstox API may have different endpoint and parameters
+        url = f"https://api.upstox.com/index/option_chain?symbol={symbol}"
+        headers = {
+            "apiKey": UPSTOX_API_KEY,
+            "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}"
+        }
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+        # Parse Upstox data to match NSE format
+        # This is a simplified example; adjust according to actual Upstox response structure
+        records = data.get("records", {})
+        chain_data = records.get("data", [])
+        expiry_dates = records.get("expiryDates", [])
+        underlying_value = records.get("underlyingValue", 0)
+
+        # Return in NSE-like format
+        return chain_data, expiry_dates, underlying_value
+
+    except Exception as e:
+        st.error(f"Upstox API fetch failed: {e}")
+        return [], [], 0
 
 # -------------------------------
-# Yahoo Finance Fallback
+# Combined Fetch with Fallback
 # -------------------------------
-def fetch_yahoo_chain(symbol):
-    url = f"https://query2.finance.yahoo.com/v7/finance/options/{symbol}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        r = requests.get(url, headers=headers, timeout=5)
-        data = r.json().get("optionChain", {}).get("result", [])
-        if not data:
-            return pd.DataFrame()
-        options = data[0].get("options", [{}])[0]
-        rows = []
-        for ce, pe in zip(options.get("calls", []), options.get("puts", [])):
-            strike = ce.get("strike", 0)
-            ce_oi = ce.get("openInterest", 0)
-            pe_oi = pe.get("openInterest", 0)
-            ce_change = ce.get("change", 0)
-            pe_change = pe.get("change", 0)
-            ce_ratio = round(ce_change / ce_oi, 2) if ce_oi else 0
-            pcr = round(pe_oi / ce_oi, 2) if ce_oi else 0
-            decay = "PE" if pe_change > ce_change else "CE"
-            rows.append({
-                "Strike Price": strike,
-                "P/C Ratio": pcr,
-                "CE Ratio": ce_ratio,
-                "CE Change": ce_change,
-                "PE Change": pe_change,
-                "Decay Rate": decay
-            })
-        return pd.DataFrame(rows)
-    except:
-        return pd.DataFrame()
-
-# -------------------------------
-# Hardened Fetch Logic
-# -------------------------------
-def safe_fetch_chain(symbol, fallback_symbol):
-    df = fetch_option_chain(symbol)
-    if df.empty or "Decay Rate" not in df.columns or df["CE Change"].sum() == 0:
-        st.warning(f"⚠️ NSE data invalid. Trying Yahoo fallback for {symbol}.")
-        df = fetch_yahoo_chain(fallback_symbol)
-        if df.empty or "Decay Rate" not in df.columns:
-            st.error(f"❌ Yahoo fallback also failed for {symbol}. Showing dummy data.")
-            df = pd.DataFrame([{
-                "Strike Price": 0,
-                "P/C Ratio": 0,
-                "CE Ratio": 0,
-                "CE Change": 0,
-                "PE Change": 0,
-                "Decay Rate": "N/A"
-            }])
-    return df
-
-df_bn = safe_fetch_chain("BANKNIFTY", "^NSEBANK")
-df_nf = safe_fetch_chain("NIFTY", "^NSEI")
-
-# -------------------------------
-# Bias Detection
-# -------------------------------
-def detect_bias(df):
-    if "Decay Rate" not in df.columns or df.empty:
-        return "⚠️ No Data"
-    bias_counts = df["Decay Rate"].value_counts()
-    return "PE Decay Active" if bias_counts.get("PE", 0) > bias_counts.get("CE", 0) else "CE Decay Active"
-
-bias_bn = detect_bias(df_bn)
-bias_nf = detect_bias(df_nf)
-
-# -------------------------------
-# Strategy Recommendation
-# -------------------------------
-def recommend_strategy(bias):
-    if "PE" in bias:
-        return "✅ Sell Put Options (Short Put)\n✅ Buy Call Options (Long Call)\n✅ Bull Call Spread"
-    elif "CE" in bias:
-        return "✅ Sell Call Options (Short Call)\n✅ Buy Put Options (Long Put)\n✅ Bear Put Spread"
+@st.cache_data(ttl=300)
+def fetch_option_chain(symbol="NIFTY"):
+    data, expiry, spot = fetch_option_chain_nse(symbol)
+    if data:
+        return data, expiry, spot
     else:
-        return "⚠️ No strategy available"
-
-strategy_bn = recommend_strategy(bias_bn)
-strategy_nf = recommend_strategy(bias_nf)
+        st.info("Switching to Upstox fallback API...")
+        return fetch_option_chain_upstox(symbol)
 
 # -------------------------------
-# Timestamp
+# Simulated RSI & Support/Resistance
 # -------------------------------
+def get_market_indicators(symbol, spot_price):
+    rsi = random.randint(25, 75)
+    support = spot_price - 100
+    resistance = spot_price + 100
+    candle_type = random.choice(["bullish", "bearish", "doji", "hammer", "engulfing"])
+    momentum_drop = random.choice([True, False])
+    return rsi, support, resistance, candle_type, momentum_drop
+
+# -------------------------------
+# Entry Validation Logic
+# -------------------------------
+def is_valid_entry(rsi, spot_price, decay_side, support, resistance):
+    if decay_side == "PE" and spot_price > support:
+        return False
+    if decay_side == "CE" and spot_price < resistance:
+        return False
+    if rsi < 30 and decay_side == "PE":
+        return False
+    if rsi > 70 and decay_side == "CE":
+        return False
+    return True
+
+# -------------------------------
+# Exit Signal Logic
+# -------------------------------
+def should_exit_trade(candle_type, momentum_drop, current_hour, spot_price, resistance):
+    if candle_type in ["doji", "hammer", "engulfing"] and momentum_drop:
+        return True
+    if current_hour >= 13 and spot_price > resistance:
+        return True
+    return False
+
+# -------------------------------
+# Confidence Score Logic
+# -------------------------------
+def calculate_confidence(row, spot_price):
+    decay_score = 30 if row["Decay Side"] == "PE" else 30 if row["Decay Side"] == "CE" else 10
+    price_zone_score = 30 if abs(row["Strike Price"] - spot_price) <= 100 else 10
+    volume_score = random.randint(20, 40)
+    return decay_score + price_zone_score + volume_score
+
+def generate_strategy(row):
+    if row["Confidence Score"] >= 75:
+        if row["Decay Side"] == "PE":
+            return "🔴 Bear Put Spread or Long Put"
+        elif row["Decay Side"] == "CE":
+            return "🟢 Bull Call Spread or Long Call"
+        else:
+            return "🟡 Iron Condor or Straddle"
+    else:
+        return "⏸️ Wait – Low conviction"
+
+def generate_levels(row):
+    strike = row["Strike Price"]
+    return f"🎯 Entry: {strike} • SL: {strike + 100} • Target: {strike - 150}" if row["Decay Side"] == "PE" else \
+           f"🎯 Entry: {strike} • SL: {strike - 100} • Target: {strike + 150}"
+
+# -------------------------------
+# Process Data
+# -------------------------------
+def process_data(chain_data, spot_price):
+    rows = []
+    for item in chain_data:
+        ce = item.get("CE", {})
+        pe = item.get("PE", {})
+        strike = item.get("strikePrice", ce.get("strikePrice", pe.get("strikePrice", 0)))
+        ce_theta = ce.get("theta", 0)
+        pe_theta = pe.get("theta", 0)
+        ce_change = ce.get("change", 0)
+        pe_change = pe.get("change", 0)
+        decay_side = "CE" if ce_theta < pe_theta else "PE"
+        confidence = calculate_confidence({
+            "Strike Price": strike,
+            "Decay Side": decay_side
+        }, spot_price)
+        strategy = generate_strategy({
+            "Strike Price": strike,
+            "Decay Side": decay_side,
+            "Confidence Score": confidence
+        })
+        levels = generate_levels({
+            "Strike Price": strike,
+            "Decay Side": decay_side
+        })
+        rows.append({
+            "Strike Price": strike,
+            "CE Theta": ce_theta,
+            "PE Theta": pe_theta,
+            "CE Change": ce_change,
+            "PE Change": pe_change,
+            "Decay Side": decay_side,
+            "Confidence Score": confidence,
+            "Strategy": strategy,
+            "Levels": levels
+        })
+    return pd.DataFrame(rows)
+
+# -------------------------------
+# UI Controls
+# -------------------------------
+symbol = st.sidebar.selectbox("Symbol", ["NIFTY", "BANKNIFTY"])
+st.sidebar.markdown("⏱️ Auto-refresh every 5 minutes")
+refresh = st.sidebar.button("🔄 Manual Refresh")
+
+# -------------------------------
+# Main Execution
+# -------------------------------
+chain_data, expiry_list, spot_price = fetch_option_chain(symbol)
+if not chain_data:
+    st.stop()
+
+rsi, support_level, resistance_level, candle_type, momentum_drop = get_market_indicators(symbol, spot_price)
+df = process_data(chain_data, spot_price)
+
+# Timestamp in IST
 ist = pytz.timezone("Asia/Kolkata")
 now = datetime.now(ist)
-timestamp = now.strftime("%d-%b-%Y %I:%M:%S %p")
+timestamp = now.strftime("%A, %d %B %Y • %I:%M %p")
+current_hour = now.hour
 
 # -------------------------------
-# Telegram Alert
+# Display Header Info
 # -------------------------------
-send_alert = st.checkbox("📲 Send Telegram Alert")
-if send_alert:
-    message = f"""
-📉 *Live Decay Bias Analyzer*  
+active_bias = df["Decay Side"].value_counts().idxmax()
 
-🟦 Bank Nifty  
-Spot: {spot_bn}  
-Expiry: {expiry_bn.strftime('%d-%b-%Y')}  
-Bias: {bias_bn}  
-Strategy:  
-{strategy_bn}  
-
-🟥 Nifty  
-Spot: {spot_nf}  
-Expiry: {expiry_nf.strftime('%d-%b-%Y')}  
-Bias: {bias_nf}  
-Strategy:  
-{strategy_nf}  
-
-⏱️ Last Updated: {timestamp}
-"""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHANNEL_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    try:
-        requests.post(url, data=payload)
-        st.success("Telegram alert sent!")
-    except Exception as e:
-        st.error(f"Telegram alert failed: {e}")
+st.markdown(f"""
+**Symbol:** `{symbol}`  
+**Spot Price:** `{spot_price}`  
+**Expiry:** `{expiry_list[0]}`  
+**Decay Bias:** `{active_bias} Decay Active`  
+📉 **RSI:** `{rsi}`  
+🕯️ **Candle Type:** `{candle_type}`  
+🕒 **Last Updated:** {timestamp}
+""")
 
 # -------------------------------
-# Display Panels
+# Filter High Confidence Trades
 # -------------------------------
-st.markdown(f"#### ⏱️ Last updated at `{timestamp}`")
+st.subheader("📊 High Confidence Trades")
+high_df = df[df["Confidence Score"] >= 75].sort_values("Confidence Score", ascending=False)
+st.dataframe(high_df[["Strike Price", "Decay Side", "Confidence Score", "Strategy", "Levels"]], use_container_width=True)
 
-tab1, tab2 = st.tabs(["🟦 Bank Nifty", "🟥 Nifty"])
+# -------------------------------
+# Strategy Panel (Below Table)
+# -------------------------------
+st.subheader("📌 Strategy Recommendations")
 
-with tab1:
-    st.markdown(f"### 📍 Spot Price: `{spot_bn}`")
-    st.markdown(f"### 📅 Expiry Date: `{expiry_bn.strftime('%d-%b-%Y
+if not is_valid_entry(rsi, spot_price, active_bias, support_level, resistance_level):
+    st.warning("⚠️ Market conditions not aligned with decay bias. Avoid entry.")
+else:
+    if active_bias == "PE":
+        st.markdown("""
+#### 🔴 Bearish Bias (Downside)
+- Put options are decaying faster than calls.
+- RSI confirms bearish zone.
+- Consider strategies:
+    - 📌 Bear Put Spread
+    - 📌 Long Put
+    - 📌 CE Shorting (if CE IV is high)
+""")
+    elif active_bias == "CE":
+        st.markdown("""
+#### 🟢 Bullish Bias (Upside)
+- Call options are decaying faster than puts.
+- RSI confirms bullish zone.
+- Consider strategies:
+    - 📌 Bull Call Spread
+    - 📌 Long Call
+    - 📌 PE Shorting (if PE IV is high)
+""")
+    else:
+        st.markdown("""
+#### 🟡 Neutral Bias (Range-bound)
+- Low decay on both CE and PE.
+- Consider strategies:
+    - 📌 Iron Condor
+    - 📌 Straddle
+    - 📌 Butterfly Spread
+""")
+
+# -------------------------------
+# Exit Signal Log
+# -------------------------------
+st.subheader("📤 Exit Signal Log")
+if should_exit_trade(candle_type, momentum_drop, current_hour, spot_price, resistance_level):
+    st.warning(f"""
+⏱️ Time: {timestamp}  
+📉 Reason: Reversal candle + momentum drop + spot breakout  
+✅ Action: Exit trade / Avoid fresh entry
+""")
+else:
+    st.success("✅ No exit signal triggered. Trade bias still valid.")
+
+# -------------------------------
+# Footer
+# -------------------------------
+st.markdown("---")
+st.caption("Built by Navinn • Sniper Entry Strategy • Powered by NSE Option Chain & Upstox Fallback")

@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
-# Import nsepython for reliable data fetching
+# Import nsepython for primary data fetching
 from nsepython import nse_optionchain_scrapper
+# Import yfinance for fallback data fetching
+import yfinance as yf
 from datetime import datetime
 import pytz
 import random
@@ -13,23 +15,58 @@ st.set_page_config(page_title="Sniper Entry Dashboard", layout="wide")
 st.title("🎯 Sniper Entry Dashboard – Nifty & BankNifty")
 
 # -------------------------------
-# Fetch Option Chain Data (Revised)
+# Fetch Option Chain Data (with Yahoo Fallback)
 # -------------------------------
 @st.cache_data(ttl=300)
 def fetch_option_chain(symbol="NIFTY"):
+    # Map NSE symbols to Yahoo Finance symbols
+    yahoo_symbol_map = {
+        "NIFTY": "^NSEI",
+        "BANKNIFTY": "^NSEBANK"
+    }
+    
+    chain_data = []
+    expiry_list = []
+    underlying_value = 0
+
     try:
-        # Using nsepython to handle session and headers
+        # Primary attempt: Fetch from NSE using nsepython
         data = nse_optionchain_scrapper(symbol)
-        
-        # Extracting data from the returned dictionary
         chain_data = data.get("records", {}).get("data", [])
         expiry_list = data.get("records", {}).get("expiryDates", [])
         underlying_value = data.get("records", {}).get("underlyingValue", 0)
-        
+
+        if not chain_data:
+            raise ValueError("NSE data is empty or invalid.")
+
         return chain_data, expiry_list, underlying_value
+
     except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return [], [], 0
+        st.warning(f"Failed to fetch data from NSE. Error: {e}")
+        st.info("Attempting to fetch spot price from Yahoo Finance as a fallback.")
+        
+        # Fallback attempt: Fetch spot price from Yahoo Finance
+        try:
+            yahoo_symbol = yahoo_symbol_map.get(symbol)
+            if yahoo_symbol:
+                ticker = yf.Ticker(yahoo_symbol)
+                history = ticker.history(period="1d")
+                if not history.empty:
+                    underlying_value = history['Close'].iloc[-1]
+                
+                # Note: Yahoo Finance doesn't provide option chain data like NSE.
+                # We can only get the spot price as a fallback.
+                st.success(f"Successfully fetched fallback spot price: {underlying_value}")
+                
+                # Return empty lists for chain data and expiry, as Yahoo doesn't have it
+                return [], [], underlying_value
+            else:
+                st.error("Invalid symbol for Yahoo Finance.")
+                return [], [], 0
+
+        except Exception as yahoo_e:
+            st.error(f"Failed to fetch fallback data from Yahoo. Error: {yahoo_e}")
+            return [], [], 0
 
 # -------------------------------
 # Simulated RSI & Support/Resistance
@@ -95,13 +132,17 @@ def generate_levels(row):
 # Process Data
 # -------------------------------
 def process_data(chain_data, spot_price):
+    # This check is important to prevent errors if the primary data source fails.
+    if not chain_data:
+        st.warning("No option chain data available. Displaying a limited view based on spot price.")
+        return pd.DataFrame([])
+
     rows = []
     for item in chain_data:
         ce = item.get("CE", {})
         pe = item.get("PE", {})
         strike = item.get("strikePrice", ce.get("strikePrice", pe.get("strikePrice", 0)))
         
-        # Check if the required keys exist before accessing
         if not ce and not pe:
             continue
             
@@ -110,7 +151,6 @@ def process_data(chain_data, spot_price):
         ce_change = ce.get("change", 0)
         pe_change = pe.get("change", 0)
         
-        # Determine decay side based on theta, assuming theta is available
         decay_side = "CE" if ce_theta < pe_theta else "PE"
         
         confidence = calculate_confidence({
@@ -153,7 +193,9 @@ refresh = st.sidebar.button("🔄 Manual Refresh")
 # Main Execution
 # -------------------------------
 chain_data, expiry_list, spot_price = fetch_option_chain(symbol)
-if not chain_data:
+
+# If no data is available from either source, stop the app.
+if not chain_data and spot_price == 0:
     st.stop()
 
 rsi, support_level, resistance_level, candle_type, momentum_drop = get_market_indicators(symbol, spot_price)
@@ -168,13 +210,11 @@ current_hour = now.hour
 # -------------------------------
 # Display Header Info
 # -------------------------------
-active_bias = df["Decay Side"].value_counts().idxmax()
-
 st.markdown(f"""
 **Symbol:** `{symbol}`  
 **Spot Price:** `{spot_price}`  
-**Expiry:** `{expiry_list[0]}`  
-**Decay Bias:** `{active_bias} Decay Active`  
+**Expiry:** `{expiry_list[0] if expiry_list else 'N/A'}`  
+**Decay Bias:** `N/A`  
 📉 **RSI:** `{rsi}`  
 🕯️ **Candle Type:** `{candle_type}`  
 🕒 **Last Updated:** {timestamp}
@@ -184,18 +224,21 @@ st.markdown(f"""
 # Filter High Confidence Trades
 # -------------------------------
 st.subheader("📊 High Confidence Trades")
-high_df = df[df["Confidence Score"] >= 75].sort_values("Confidence Score", ascending=False)
-st.dataframe(high_df[["Strike Price", "Decay Side", "Confidence Score", "Strategy", "Levels"]], use_container_width=True)
+if not df.empty:
+    high_df = df[df["Confidence Score"] >= 75].sort_values("Confidence Score", ascending=False)
+    st.dataframe(high_df[["Strike Price", "Decay Side", "Confidence Score", "Strategy", "Levels"]], use_container_width=True)
+else:
+    st.info("Option chain data is not available. Displaying a limited view.")
 
 # -------------------------------
 # Strategy Panel (Below Table)
 # -------------------------------
 st.subheader("📌 Strategy Recommendations")
-
-if not is_valid_entry(rsi, spot_price, active_bias, support_level, resistance_level):
-    st.warning("⚠️ Market conditions not aligned with decay bias. Avoid entry.")
-else:
-    if active_bias == "PE":
+if not df.empty:
+    active_bias = df["Decay Side"].value_counts().idxmax()
+    if not is_valid_entry(rsi, spot_price, active_bias, support_level, resistance_level):
+        st.warning("⚠️ Market conditions not aligned with decay bias. Avoid entry.")
+    elif active_bias == "PE":
         st.markdown("""
 #### 🔴 Bearish Bias (Downside)
 - Put options are decaying faster than calls.
@@ -224,6 +267,8 @@ else:
     - 📌 Straddle
     - 📌 Butterfly Spread
 """)
+else:
+    st.info("No option chain data to provide strategy recommendations.")
 
 # -------------------------------
 # Exit Signal Log
@@ -242,4 +287,4 @@ else:
 # Footer
 # -------------------------------
 st.markdown("---")
-st.caption("Built by Navinn • Sniper Entry Strategy • Powered by NSE Option Chain")
+st.caption("Built by Navinn • Sniper Entry Strategy • Powered by NSE Option Chain and Yahoo Finance")

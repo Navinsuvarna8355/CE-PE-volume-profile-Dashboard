@@ -63,18 +63,18 @@ def generate_theta_table(spot):
     strikes = range(int(spot - 200), int(spot + 400), 100)
     data = []
     for strike in strikes:
-        ce_theta = round(random.uniform(20, 70), 2)
-        pe_theta = 0
-        ce_change = 0
-        pe_change = 0
-        decay_bias = "PE" if ce_theta > pe_theta else "CE"
+        ce_change = round(random.uniform(30, 70), 2)
+        pe_change = round(random.uniform(10, 50), 2)
+        ce_ratio = round(random.uniform(0.5, 1.5), 2)
+        pc_ratio = round(random.uniform(0.3, 1.2), 2)
+        decay_rate = "PE" if ce_change > pe_change else "CE"
         data.append({
             "Strike Price": strike,
-            "PE Theta": pe_theta,
-            "CE Theta": ce_theta,
+            "P/C Ratio": pc_ratio,
+            "CE Ratio": ce_ratio,
             "CE Change": ce_change,
             "PE Change": pe_change,
-            "Decay Bias": decay_bias
+            "Decay Rate": decay_rate
         })
     return pd.DataFrame(data)
 
@@ -85,7 +85,7 @@ df_nf = generate_theta_table(spot_nf)
 # Bias Detection
 # -------------------------------
 def detect_bias(df):
-    bias_counts = df["Decay Bias"].value_counts()
+    bias_counts = df["Decay Rate"].value_counts()
     return "PE Decay Active" if bias_counts.get("PE", 0) > bias_counts.get("CE", 0) else "CE Decay Active"
 
 bias_bn = detect_bias(df_bn)

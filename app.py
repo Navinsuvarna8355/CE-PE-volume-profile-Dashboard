@@ -125,17 +125,27 @@ def fetch_yahoo_chain(symbol):
         return pd.DataFrame()
 
 # -------------------------------
-# Fetch with Fallback
+# Hardened Fetch Logic
 # -------------------------------
-df_bn = fetch_option_chain("BANKNIFTY")
-if df_bn.empty or "Decay Rate" not in df_bn.columns or df_bn["CE Change"].sum() == 0:
-    st.warning("⚠️ NSE data invalid. Using Yahoo fallback for Bank Nifty.")
-    df_bn = fetch_yahoo_chain("^NSEBANK")
+def safe_fetch_chain(symbol, fallback_symbol):
+    df = fetch_option_chain(symbol)
+    if df.empty or "Decay Rate" not in df.columns or df["CE Change"].sum() == 0:
+        st.warning(f"⚠️ NSE data invalid. Trying Yahoo fallback for {symbol}.")
+        df = fetch_yahoo_chain(fallback_symbol)
+        if df.empty or "Decay Rate" not in df.columns:
+            st.error(f"❌ Yahoo fallback also failed for {symbol}. Showing dummy data.")
+            df = pd.DataFrame([{
+                "Strike Price": 0,
+                "P/C Ratio": 0,
+                "CE Ratio": 0,
+                "CE Change": 0,
+                "PE Change": 0,
+                "Decay Rate": "N/A"
+            }])
+    return df
 
-df_nf = fetch_option_chain("NIFTY")
-if df_nf.empty or "Decay Rate" not in df_nf.columns or df_nf["CE Change"].sum() == 0:
-    st.warning("⚠️ NSE data invalid. Using Yahoo fallback for Nifty.")
-    df_nf = fetch_yahoo_chain("^NSEI")
+df_bn = safe_fetch_chain("BANKNIFTY", "^NSEBANK")
+df_nf = safe_fetch_chain("NIFTY", "^NSEI")
 
 # -------------------------------
 # Bias Detection
@@ -215,13 +225,4 @@ tab1, tab2 = st.tabs(["🟦 Bank Nifty", "🟥 Nifty"])
 
 with tab1:
     st.markdown(f"### 📍 Spot Price: `{spot_bn}`")
-    st.markdown(f"### 📅 Expiry Date: `{expiry_bn.strftime('%d-%b-%Y')}`")
-    st.markdown(f"### 📊 Decay Bias: `{bias_bn}`")
-    st.subheader("📊 Analysis")
-    st.dataframe(df_bn, use_container_width=True)
-    st.subheader("🎯 Trading Recommendations")
-    for line in strategy_bn.split("\n"):
-        st.markdown(f"- {line}")
-
-with tab2:
-    st.markdown
+    st.markdown(f"### 📅 Expiry Date: `{expiry_bn.strftime('%d-%b-%Y

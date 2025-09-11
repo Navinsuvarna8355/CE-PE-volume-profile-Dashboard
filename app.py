@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
-# Import nsepython for primary data fetching
 from nsepython import nse_optionchain_scrapper
-# Import yfinance for fallback data fetching
 import yfinance as yf
 from datetime import datetime
 import pytz
@@ -54,11 +52,8 @@ def fetch_option_chain(symbol="NIFTY"):
                 if not history.empty:
                     underlying_value = history['Close'].iloc[-1]
                 
-                # Note: Yahoo Finance doesn't provide option chain data like NSE.
-                # We can only get the spot price as a fallback.
                 st.success(f"Successfully fetched fallback spot price: {underlying_value}")
                 
-                # Return empty lists for chain data and expiry, as Yahoo doesn't have it
                 return [], [], underlying_value
             else:
                 st.error("Invalid symbol for Yahoo Finance.")
@@ -132,7 +127,6 @@ def generate_levels(row):
 # Process Data
 # -------------------------------
 def process_data(chain_data, spot_price):
-    # This check is important to prevent errors if the primary data source fails.
     if not chain_data:
         st.warning("No option chain data available. Displaying a limited view based on spot price.")
         return pd.DataFrame([])
@@ -194,7 +188,6 @@ refresh = st.sidebar.button("🔄 Manual Refresh")
 # -------------------------------
 chain_data, expiry_list, spot_price = fetch_option_chain(symbol)
 
-# If no data is available from either source, stop the app.
 if not chain_data and spot_price == 0:
     st.stop()
 

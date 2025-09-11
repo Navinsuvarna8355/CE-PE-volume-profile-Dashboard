@@ -6,6 +6,7 @@ import pytz
 import random
 import time
 import urllib.parse
+import os
 
 # -------------------------------
 # Streamlit Config
@@ -18,9 +19,9 @@ st.title("🎯 Sniper Entry Dashboard – Nifty & BankNifty")
 # -------------------------------
 def get_upstox_access_token():
     """Handles the OAuth2 flow to get a new access token."""
-    api_key = st.secrets["UPSTOX_API_KEY"]
-    api_secret = st.secrets["UPSTOX_API_SECRET"]
-    redirect_uri = st.secrets["UPSTOX_REDIRECT_URI"]
+    api_key = os.getenv("UPSTOX_API_KEY") or st.secrets["UPSTOX_API_KEY"]
+    api_secret = os.getenv("UPSTOX_API_SECRET") or st.secrets["UPSTOX_API_SECRET"]
+    redirect_uri = os.getenv("UPSTOX_REDIRECT_URI") or st.secrets["UPSTOX_REDIRECT_URI"]
 
     code = st.query_params.get("code")
 
@@ -96,15 +97,8 @@ def fetch_option_chain_upstox(symbol="NIFTY"):
         return [], [], 0
 
     try:
-        # Upstox V2 API to get Instrument Key
-        instrument_url = "https://api.upstox.com/v2/market-quotes/instruments"
-        headers = {
-            "Accept": "application/json",
-            "Authorization": f"Bearer {access_token}"
-        }
-        
         # NOTE: Upstox requires a specific instrument key, which is complex.
-        # This is a simplified example.
+        # This is a simplified example with mock data.
         st.warning("Using mock data from Upstox fallback. Real API integration is complex.")
         chain_data = []
         expiry_dates = ["2025-10-02"]
@@ -137,10 +131,10 @@ def fetch_option_chain(symbol="NIFTY"):
             get_upstox_access_token()
             return [], [], 0
         return fetch_option_chain_upstox(symbol)
-# -------------------------------
-# Rest of the code remains the same...
-# -------------------------------
 
+# -------------------------------
+# Simulated RSI & Support/Resistance
+# -------------------------------
 def get_market_indicators(symbol, spot_price):
     rsi = random.randint(25, 75)
     support = spot_price - 100
@@ -149,6 +143,9 @@ def get_market_indicators(symbol, spot_price):
     momentum_drop = random.choice([True, False])
     return rsi, support, resistance, candle_type, momentum_drop
 
+# -------------------------------
+# Entry Validation Logic
+# -------------------------------
 def is_valid_entry(rsi, spot_price, decay_side, support, resistance):
     if decay_side == "PE" and spot_price > support:
         return False
@@ -160,6 +157,9 @@ def is_valid_entry(rsi, spot_price, decay_side, support, resistance):
         return False
     return True
 
+# -------------------------------
+# Exit Signal Logic
+# -------------------------------
 def should_exit_trade(candle_type, momentum_drop, current_hour, spot_price, resistance):
     if candle_type in ["doji", "hammer", "engulfing"] and momentum_drop:
         return True
@@ -167,6 +167,9 @@ def should_exit_trade(candle_type, momentum_drop, current_hour, spot_price, resi
         return True
     return False
 
+# -------------------------------
+# Confidence Score Logic
+# -------------------------------
 def calculate_confidence(row, spot_price):
     decay_score = 30 if row["Decay Side"] == "PE" else 30 if row["Decay Side"] == "CE" else 10
     price_zone_score = 30 if abs(row["Strike Price"] - spot_price) <= 100 else 10
@@ -189,6 +192,9 @@ def generate_levels(row):
     return f"🎯 Entry: {strike} • SL: {strike + 100} • Target: {strike - 150}" if row["Decay Side"] == "PE" else \
            f"🎯 Entry: {strike} • SL: {strike - 100} • Target: {strike + 150}"
 
+# -------------------------------
+# Process Data
+# -------------------------------
 def process_data(chain_data, spot_price):
     rows = []
     for item in chain_data:
@@ -246,6 +252,7 @@ refresh = st.sidebar.button("🔄 Manual Refresh")
 # -------------------------------
 chain_data, expiry_list, spot_price = fetch_option_chain(symbol)
 if not chain_data:
+    st.error("🚨 Failed to fetch data. Please check your internet connection and API keys.")
     st.stop()
 
 rsi, support_level, resistance_level, candle_type, momentum_drop = get_market_indicators(symbol, spot_price)

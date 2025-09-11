@@ -1,177 +1,227 @@
 import streamlit as st
 import pandas as pd
-from nsepython import nse_optionchain_scrapper
-import yfinance as yf
-from datetime import datetime
+import requests
+from datetime import datetime, timedelta
 import pytz
-import random
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import time
+import calendar
 
 # -------------------------------
-# Streamlit Config
+# Configurations
 # -------------------------------
-st.set_page_config(page_title="Sniper Entry Dashboard", layout="wide")
-st.title("🎯 Sniper Entry Dashboard – Nifty & BankNifty")
+BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
+CHANNEL_ID = "@navinnsuvarna"
+
+st.set_page_config(page_title="Live Decay Bias Analyzer", layout="wide")
+st.title("📉 Live Decay Bias Analyzer – Bank Nifty & Nifty")
 
 # -------------------------------
-# Fetch Option Chain Data (with Yahoo Fallback)
+# Expiry Calculators
 # -------------------------------
-@st.cache_data(ttl=300)
-def fetch_option_chain(symbol="NIFTY"):
-    yahoo_symbol_map = {
-        "NIFTY": "^NSEI",
-        "BANKNIFTY": "^NSEBANK"
+def get_last_tuesday(year, month):
+    last_day = calendar.monthrange(year, month)[1]
+    for day in range(last_day, 0, -1):
+        date = datetime(year, month, day)
+        if date.weekday() == 1:
+            return date
+    return datetime(year, month, last_day)
+
+def get_next_tuesday(today):
+    days_ahead = (1 - today.weekday() + 7) % 7
+    return today + timedelta(days=days_ahead)
+
+today = datetime.now()
+expiry_bn = get_last_tuesday(today.year, today.month)
+expiry_nf = get_next_tuesday(today)
+
+# -------------------------------
+# Spot Price Fetcher
+# -------------------------------
+def fetch_spot(symbol):
+    url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9"
     }
-    
-    chain_data = []
-    expiry_list = []
-    underlying_value = 0
-
     try:
-        data = nse_optionchain_scrapper(symbol)
-        chain_data = data.get("records", {}).get("data", [])
-        expiry_list = data.get("records", {}).get("expiryDates", [])
-        underlying_value = data.get("records", {}).get("underlyingValue", 0)
+        r = requests.get(url, headers=headers, timeout=5)
+        data = r.json()
+        return float(data["underlyingValue"])
+    except:
+        return None
 
-        if not chain_data:
-            raise ValueError("NSE data is empty or invalid.")
-
-        return chain_data, expiry_list, underlying_value
-
-    except Exception as e:
-        st.warning(f"Failed to fetch data from NSE. Error: {e}")
-        st.info("Attempting to fetch spot price from Yahoo Finance as a fallback.")
-        
-        try:
-            yahoo_symbol = yahoo_symbol_map.get(symbol)
-            if yahoo_symbol:
-                ticker = yf.Ticker(yahoo_symbol)
-                history = ticker.history(period="1d")
-                if not history.empty:
-                    underlying_value = history['Close'].iloc[-1]
-                
-                st.success(f"Successfully fetched fallback spot price: {underlying_value}")
-                
-                return [], [], underlying_value
-            else:
-                st.error("Invalid symbol for Yahoo Finance.")
-                return [], [], 0
-
-        except Exception as yahoo_e:
-            st.error(f"Failed to fetch fallback data from Yahoo. Error: {yahoo_e}")
-            return [], [], 0
+spot_bn = fetch_spot("BANKNIFTY") or 44850.25
+spot_nf = fetch_spot("NIFTY") or 24948.25
 
 # -------------------------------
-# Main Execution
+# Option Chain from NSE
 # -------------------------------
+def fetch_option_chain(symbol):
+    url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=5)
+        data = r.json().get("records", {}).get("data", [])
+        rows = []
+        for entry in data:
+            strike = entry.get("strikePrice")
+            ce = entry.get("CE", {})
+            pe = entry.get("PE", {})
+            ce_change = ce.get("changeinOpenInterest", 0)
+            pe_change = pe.get("changeinOpenInterest", 0)
+            ce_oi = ce.get("openInterest", 1)
+            pe_oi = pe.get("openInterest", 1)
+            ce_ratio = round(ce_change / ce_oi, 2) if ce_oi else 0
+            pcr = round(pe_oi / ce_oi, 2) if ce_oi else 0
+            decay = "PE" if pe_change > ce_change else "CE"
+            rows.append({
+                "Strike Price": strike,
+                "P/C Ratio": pcr,
+                "CE Ratio": ce_ratio,
+                "CE Change": ce_change,
+                "PE Change": pe_change,
+                "Decay Rate": decay
+            })
+        return pd.DataFrame(rows)
+    except:
+        return pd.DataFrame()
 
-# Sidebar Controls
-with st.sidebar:
-    st.header("Settings")
-    symbol = st.selectbox("Index", ["NIFTY", "BANKNIFTY"])
-    auto_refresh = st.checkbox("Auto Refresh", value=True)
-    refresh_interval = st.slider("Refresh Interval (s)", 30, 600, 60)
-    fetch_now = st.button("Fetch Now")
+# -------------------------------
+# Yahoo Finance Fallback
+# -------------------------------
+def fetch_yahoo_chain(symbol):
+    url = f"https://query2.finance.yahoo.com/v7/finance/options/{symbol}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        r = requests.get(url, headers=headers, timeout=5)
+        data = r.json().get("optionChain", {}).get("result", [])
+        if not data:
+            return pd.DataFrame()
+        options = data[0].get("options", [{}])[0]
+        rows = []
+        for ce, pe in zip(options.get("calls", []), options.get("puts", [])):
+            strike = ce.get("strike", 0)
+            ce_oi = ce.get("openInterest", 0)
+            pe_oi = pe.get("openInterest", 0)
+            ce_change = ce.get("change", 0)
+            pe_change = pe.get("change", 0)
+            ce_ratio = round(ce_change / ce_oi, 2) if ce_oi else 0
+            pcr = round(pe_oi / ce_oi, 2) if ce_oi else 0
+            decay = "PE" if pe_change > ce_change else "CE"
+            rows.append({
+                "Strike Price": strike,
+                "P/C Ratio": pcr,
+                "CE Ratio": ce_ratio,
+                "CE Change": ce_change,
+                "PE Change": pe_change,
+                "Decay Rate": decay
+            })
+        return pd.DataFrame(rows)
+    except:
+        return pd.DataFrame()
 
-# Auto-refresh logic
-if auto_refresh and not fetch_now:
-    with st.empty():
-        for seconds in range(refresh_interval, 0, -1):
-            st.write(f"Refreshing in {seconds} seconds...")
-            time.sleep(1)
-    st.rerun()
+# -------------------------------
+# Fetch with Fallback
+# -------------------------------
+df_bn = fetch_option_chain("BANKNIFTY")
+if df_bn.empty or "Decay Rate" not in df_bn.columns or df_bn["CE Change"].sum() == 0:
+    st.warning("⚠️ NSE data invalid. Using Yahoo fallback for Bank Nifty.")
+    df_bn = fetch_yahoo_chain("^NSEBANK")
 
-if fetch_now:
-    st.cache_data.clear()
-    st.rerun()
+df_nf = fetch_option_chain("NIFTY")
+if df_nf.empty or "Decay Rate" not in df_nf.columns or df_nf["CE Change"].sum() == 0:
+    st.warning("⚠️ NSE data invalid. Using Yahoo fallback for Nifty.")
+    df_nf = fetch_yahoo_chain("^NSEI")
 
-chain_data, expiry_list, spot_price = fetch_option_chain(symbol)
+# -------------------------------
+# Bias Detection
+# -------------------------------
+def detect_bias(df):
+    if "Decay Rate" not in df.columns or df.empty:
+        return "⚠️ No Data"
+    bias_counts = df["Decay Rate"].value_counts()
+    return "PE Decay Active" if bias_counts.get("PE", 0) > bias_counts.get("CE", 0) else "CE Decay Active"
 
-# --- Top Header Section ---
-col1, col2, col3 = st.columns(3)
-col1.metric("Nifty Spot Price", f"{spot_price:.2f}")
-col2.metric("Expiry Date", expiry_list[0] if expiry_list else "N/A")
+bias_bn = detect_bias(df_bn)
+bias_nf = detect_bias(df_nf)
 
-if chain_data:
-    df_temp = pd.DataFrame(chain_data)
-    pe_decay_theta = df_temp["PE"].apply(lambda x: x.get("theta", 0))
-    ce_decay_theta = df_temp["CE"].apply(lambda x: x.get("theta", 0))
-    
-    # Calculate average decay to determine bias
-    if pe_decay_theta.mean() > ce_decay_theta.mean():
-        decay_bias = "PE Decay Active"
-    elif ce_decay_theta.mean() > pe_decay_theta.mean():
-        decay_bias = "CE Decay Active"
+# -------------------------------
+# Strategy Recommendation
+# -------------------------------
+def recommend_strategy(bias):
+    if "PE" in bias:
+        return "✅ Sell Put Options (Short Put)\n✅ Buy Call Options (Long Call)\n✅ Bull Call Spread"
+    elif "CE" in bias:
+        return "✅ Sell Call Options (Short Call)\n✅ Buy Put Options (Long Put)\n✅ Bear Put Spread"
     else:
-        decay_bias = "Neutral/No Clear Bias"
-else:
-    decay_bias = "N/A"
+        return "⚠️ No strategy available"
 
-col3.metric("Decay Bias", decay_bias)
-st.write(f"Last updated: {datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%H:%M:%S IST')}")
+strategy_bn = recommend_strategy(bias_bn)
+strategy_nf = recommend_strategy(bias_nf)
 
-# --- Main Analysis Section ---
-st.subheader("Analysis")
-tab1, tab2 = st.tabs(["Data Table", "Theta Chart"])
+# -------------------------------
+# Timestamp
+# -------------------------------
+ist = pytz.timezone("Asia/Kolkata")
+now = datetime.now(ist)
+timestamp = now.strftime("%d-%b-%Y %I:%M:%S %p")
+
+# -------------------------------
+# Telegram Alert
+# -------------------------------
+send_alert = st.checkbox("📲 Send Telegram Alert")
+if send_alert:
+    message = f"""
+📉 *Live Decay Bias Analyzer*  
+
+🟦 Bank Nifty  
+Spot: {spot_bn}  
+Expiry: {expiry_bn.strftime('%d-%b-%Y')}  
+Bias: {bias_bn}  
+Strategy:  
+{strategy_bn}  
+
+🟥 Nifty  
+Spot: {spot_nf}  
+Expiry: {expiry_nf.strftime('%d-%b-%Y')}  
+Bias: {bias_nf}  
+Strategy:  
+{strategy_nf}  
+
+⏱️ Last Updated: {timestamp}
+"""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHANNEL_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, data=payload)
+        st.success("Telegram alert sent!")
+    except Exception as e:
+        st.error(f"Telegram alert failed: {e}")
+
+# -------------------------------
+# Display Panels
+# -------------------------------
+st.markdown(f"#### ⏱️ Last updated at `{timestamp}`")
+
+tab1, tab2 = st.tabs(["🟦 Bank Nifty", "🟥 Nifty"])
 
 with tab1:
-    if chain_data:
-        df_rows = []
-        for item in chain_data:
-            strike = item.get("strikePrice")
-            ce = item.get("CE", {})
-            pe = item.get("PE", {})
-            
-            df_rows.append({
-                "Strike Price": strike,
-                "CE Theta": ce.get("theta", 0),
-                "PE Theta": pe.get("theta", 0),
-                "CE Change": ce.get("change", 0),
-                "PE Change": pe.get("change", 0),
-                "Decay Side": "CE" if ce.get("theta", 0) < pe.get("theta", 0) else "PE"
-            })
-        
-        df = pd.DataFrame(df_rows)
-        st.dataframe(df.sort_values("Strike Price"))
-    else:
-        st.warning("No option chain data available to display.")
+    st.markdown(f"### 📍 Spot Price: `{spot_bn}`")
+    st.markdown(f"### 📅 Expiry Date: `{expiry_bn.strftime('%d-%b-%Y')}`")
+    st.markdown(f"### 📊 Decay Bias: `{bias_bn}`")
+    st.subheader("📊 Analysis")
+    st.dataframe(df_bn, use_container_width=True)
+    st.subheader("🎯 Trading Recommendations")
+    for line in strategy_bn.split("\n"):
+        st.markdown(f"- {line}")
 
 with tab2:
-    if chain_data:
-        strikes = [item['strikePrice'] for item in chain_data]
-        ce_theta = [item.get('CE', {}).get('theta', 0) for item in chain_data]
-        pe_theta = [item.get('PE', {}).get('theta', 0) for item in chain_data]
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=strikes, y=ce_theta, mode='lines+markers', name='CE Theta'))
-        fig.add_trace(go.Scatter(x=strikes, y=pe_theta, mode='lines+markers', name='PE Theta'))
-        fig.update_layout(title='Theta vs. Strike Price', xaxis_title='Strike Price', yaxis_title='Theta', legend_title='Option Type')
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("No option chain data to generate the Theta Chart.")
-
-# --- Trading Recommendations Section ---
-st.header("Trading Recommendations")
-
-if decay_bias == "CE Decay Active":
-    st.info("These suggestions are based on decay bias. Always use additional analysis.")
-    st.subheader("Bearish Bias (Downside)")
-    st.write("Call options are decaying faster than puts. Consider bearish strategies:")
-    st.markdown("""
-- Sell Call Options (Short Call)
-- Buy Put Options (Long Put)
-- Bear Put Spread
-""")
-elif decay_bias == "PE Decay Active":
-    st.info("These suggestions are based on decay bias. Always use additional analysis.")
-    st.subheader("Bullish Bias (Upside)")
-    st.write("Put options are decaying faster than calls. Consider bullish strategies:")
-    st.markdown("""
-- Sell Put Options (Short Put)
-- Buy Call Options (Long Call)
-- Bull Call Spread
-""")
-else:
-    st.info("Market is likely neutral or data is unavailable. No strong decay bias detected.")
+    st.markdown

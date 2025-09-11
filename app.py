@@ -1,43 +1,228 @@
 import streamlit as st
+import pandas as pd
 import requests
-from bs4 import BeautifulSoup
-import time
+from datetime import datetime, timedelta
+import pytz
+import calendar
 
-st.set_page_config(page_title="NSE Option Chain Scraper", layout="wide")
-st.title("📄 NSE Option Chain HTML Scraper (Basic)")
+# -------------------------------
+# Configurations
+# -------------------------------
+BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
+CHANNEL_ID = "@navinnsuvarna"
 
-def scrape_option_chain_html(symbol="NIFTY"):
-    url = f"https://www.nseindia.com/option-chain?symbol={symbol}"
+st.set_page_config(page_title="Live Decay Bias Analyzer", layout="wide")
+st.title("📉 Live Decay Bias Analyzer – Bank Nifty & Nifty")
+
+# -------------------------------
+# Expiry Calculators
+# -------------------------------
+def get_last_tuesday(year, month):
+    last_day = calendar.monthrange(year, month)[1]
+    for day in range(last_day, 0, -1):
+        date = datetime(year, month, day)
+        if date.weekday() == 1:
+            return date
+    return datetime(year, month, last_day)
+
+def get_next_tuesday(today):
+    days_ahead = (1 - today.weekday() + 7) % 7
+    return today + timedelta(days=days_ahead)
+
+today = datetime.now()
+expiry_bn = get_last_tuesday(today.year, today.month)
+expiry_nf = get_next_tuesday(today)
+
+# -------------------------------
+# Spot Price Fetcher
+# -------------------------------
+def fetch_spot(symbol):
+    url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
     headers = {
-        "User -Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.nseindia.com"
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9"
     }
-    session = requests.Session()
     try:
-        # First request to get cookies
-        session.get("https://www.nseindia.com", headers=headers, timeout=5)
-        time.sleep(1)  # polite delay
-        response = session.get(url, headers=headers, timeout=5)
-        response.raise_for_status()
-        return response.text
-    except Exception as e:
-        st.error(f"Failed to fetch NSE option chain page: {e}")
+        r = requests.get(url, headers=headers, timeout=5)
+        data = r.json()
+        return float(data["underlyingValue"])
+    except:
         return None
 
-symbol = st.sidebar.selectbox("Select Symbol", ["NIFTY", "BANKNIFTY"])
-if st.sidebar.button("Fetch Option Chain HTML"):
-    html = scrape_option_chain_html(symbol)
-    if html:
-        st.success(f"Fetched NSE option chain page HTML for {symbol} (length: {len(html)} characters)")
-        # Show page title as a simple check
-        soup = BeautifulSoup(html, "html.parser")
-        title = soup.title.string if soup.title else "No title found"
-        st.write(f"Page Title: {title}")
+spot_bn = fetch_spot("BANKNIFTY") or 44850.25
+spot_nf = fetch_spot("NIFTY") or 24948.25
 
-        # Example: Show first 1000 characters of HTML
-        st.code(html[:1000], language="html")
+# -------------------------------
+# Option Chain from NSE
+# -------------------------------
+def fetch_option_chain(symbol):
+    url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=5)
+        data = r.json().get("records", {}).get("data", [])
+        rows = []
+        for entry in data:
+            strike = entry.get("strikePrice")
+            ce = entry.get("CE", {})
+            pe = entry.get("PE", {})
+            ce_change = ce.get("changeinOpenInterest", 0)
+            pe_change = pe.get("changeinOpenInterest", 0)
+            ce_oi = ce.get("openInterest", 1)
+            pe_oi = pe.get("openInterest", 1)
+            ce_ratio = round(ce_change / ce_oi, 2) if ce_oi else 0
+            pcr = round(pe_oi / ce_oi, 2) if ce_oi else 0
+            decay = "PE" if pe_change > ce_change else "CE"
+            rows.append({
+                "Strike Price": strike,
+                "P/C Ratio": pcr,
+                "CE Ratio": ce_ratio,
+                "CE Change": ce_change,
+                "PE Change": pe_change,
+                "Decay Rate": decay
+            })
+        return pd.DataFrame(rows)
+    except:
+        return pd.DataFrame()
 
-        # TODO: You can add parsing logic here to extract data from HTML if possible
+# -------------------------------
+# Yahoo Finance Fallback
+# -------------------------------
+def fetch_yahoo_chain(symbol):
+    url = f"https://query2.finance.yahoo.com/v7/finance/options/{symbol}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        r = requests.get(url, headers=headers, timeout=5)
+        data = r.json().get("optionChain", {}).get("result", [])
+        if not data:
+            return pd.DataFrame()
+        options = data[0].get("options", [{}])[0]
+        rows = []
+        for ce, pe in zip(options.get("calls", []), options.get("puts", [])):
+            strike = ce.get("strike", 0)
+            ce_oi = ce.get("openInterest", 0)
+            pe_oi = pe.get("openInterest", 0)
+            ce_change = ce.get("change", 0)
+            pe_change = pe.get("change", 0)
+            ce_ratio = round(ce_change / ce_oi, 2) if ce_oi else 0
+            pcr = round(pe_oi / ce_oi, 2) if ce_oi else 0
+            decay = "PE" if pe_change > ce_change else "CE"
+            rows.append({
+                "Strike Price": strike,
+                "P/C Ratio": pcr,
+                "CE Ratio": ce_ratio,
+                "CE Change": ce_change,
+                "PE Change": pe_change,
+                "Decay Rate": decay
+            })
+        return pd.DataFrame(rows)
+    except:
+        return pd.DataFrame()
+
+# -------------------------------
+# Hardened Fetch Logic
+# -------------------------------
+def safe_fetch_chain(symbol, fallback_symbol):
+    df = fetch_option_chain(symbol)
+    if df.empty or "Decay Rate" not in df.columns or df["CE Change"].sum() == 0:
+        st.warning(f"⚠️ NSE data invalid. Trying Yahoo fallback for {symbol}.")
+        df = fetch_yahoo_chain(fallback_symbol)
+        if df.empty or "Decay Rate" not in df.columns:
+            st.error(f"❌ Yahoo fallback also failed for {symbol}. Showing dummy data.")
+            df = pd.DataFrame([{
+                "Strike Price": 0,
+                "P/C Ratio": 0,
+                "CE Ratio": 0,
+                "CE Change": 0,
+                "PE Change": 0,
+                "Decay Rate": "N/A"
+            }])
+    return df
+
+df_bn = safe_fetch_chain("BANKNIFTY", "^NSEBANK")
+df_nf = safe_fetch_chain("NIFTY", "^NSEI")
+
+# -------------------------------
+# Bias Detection
+# -------------------------------
+def detect_bias(df):
+    if "Decay Rate" not in df.columns or df.empty:
+        return "⚠️ No Data"
+    bias_counts = df["Decay Rate"].value_counts()
+    return "PE Decay Active" if bias_counts.get("PE", 0) > bias_counts.get("CE", 0) else "CE Decay Active"
+
+bias_bn = detect_bias(df_bn)
+bias_nf = detect_bias(df_nf)
+
+# -------------------------------
+# Strategy Recommendation
+# -------------------------------
+def recommend_strategy(bias):
+    if "PE" in bias:
+        return "✅ Sell Put Options (Short Put)\n✅ Buy Call Options (Long Call)\n✅ Bull Call Spread"
+    elif "CE" in bias:
+        return "✅ Sell Call Options (Short Call)\n✅ Buy Put Options (Long Put)\n✅ Bear Put Spread"
     else:
-        st.error("Failed to fetch or parse NSE option chain page.")
+        return "⚠️ No strategy available"
+
+strategy_bn = recommend_strategy(bias_bn)
+strategy_nf = recommend_strategy(bias_nf)
+
+# -------------------------------
+# Timestamp
+# -------------------------------
+ist = pytz.timezone("Asia/Kolkata")
+now = datetime.now(ist)
+timestamp = now.strftime("%d-%b-%Y %I:%M:%S %p")
+
+# -------------------------------
+# Telegram Alert
+# -------------------------------
+send_alert = st.checkbox("📲 Send Telegram Alert")
+if send_alert:
+    message = f"""
+📉 *Live Decay Bias Analyzer*  
+
+🟦 Bank Nifty  
+Spot: {spot_bn}  
+Expiry: {expiry_bn.strftime('%d-%b-%Y')}  
+Bias: {bias_bn}  
+Strategy:  
+{strategy_bn}  
+
+🟥 Nifty  
+Spot: {spot_nf}  
+Expiry: {expiry_nf.strftime('%d-%b-%Y')}  
+Bias: {bias_nf}  
+Strategy:  
+{strategy_nf}  
+
+⏱️ Last Updated: {timestamp}
+"""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHANNEL_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, data=payload)
+        st.success("Telegram alert sent!")
+    except Exception as e:
+        st.error(f"Telegram alert failed: {e}")
+
+# -------------------------------
+# Display Panels
+# -------------------------------
+st.markdown(f"#### ⏱️ Last updated at `{timestamp}`")
+
+tab1, tab2 = st.tabs(["🟦 Bank Nifty", "🟥 Nifty"])
+
+with tab1:
+    st.markdown(f"### 📍 Spot Price: `{spot_bn}`")
+    st.markdown(f"### 📅 Expiry Date: `{expiry_bn.strftime('%d-%b-%Y')

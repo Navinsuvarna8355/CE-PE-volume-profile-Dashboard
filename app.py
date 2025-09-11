@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
+import requests
 from datetime import datetime, timedelta
 import pytz
-import random
-import requests
 import calendar
 
 # -------------------------------
@@ -12,23 +11,8 @@ import calendar
 BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
 CHANNEL_ID = "@navinnsuvarna"
 
-st.set_page_config(page_title="Dual Decay Bias Analyzer", layout="wide")
-st.title("📉 Decay Bias Analyzer – Bank Nifty & Nifty")
-
-# -------------------------------
-# Spot Price Fetcher with Fallback
-# -------------------------------
-def fetch_spot(symbol, fallback):
-    url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
-    try:
-        response = requests.get(url, headers={
-            "User-Agent": "Mozilla/5.0",
-            "Accept-Language": "en-US,en;q=0.9"
-        })
-        data = response.json()
-        return float(data["underlyingValue"])
-    except:
-        return fallback
+st.set_page_config(page_title="Live Decay Bias Analyzer", layout="wide")
+st.title("📉 Live Decay Bias Analyzer – Bank Nifty & Nifty")
 
 # -------------------------------
 # Expiry Calculators
@@ -37,7 +21,7 @@ def get_last_tuesday(year, month):
     last_day = calendar.monthrange(year, month)[1]
     for day in range(last_day, 0, -1):
         date = datetime(year, month, day)
-        if date.weekday() == 1:  # Tuesday
+        if date.weekday() == 1:
             return date
     return datetime(year, month, last_day)
 
@@ -45,41 +29,67 @@ def get_next_tuesday(today):
     days_ahead = (1 - today.weekday() + 7) % 7
     return today + timedelta(days=days_ahead)
 
-# -------------------------------
-# Inputs
-# -------------------------------
 today = datetime.now()
 expiry_bn = get_last_tuesday(today.year, today.month)
 expiry_nf = get_next_tuesday(today)
-send_alert = st.checkbox("📲 Send Telegram Alert")
-
-spot_bn = fetch_spot("BANKNIFTY", fallback=44850.25)
-spot_nf = fetch_spot("NIFTY", fallback=24948.25)
 
 # -------------------------------
-# Theta Table Generator
+# Spot Price Fetcher
 # -------------------------------
-def generate_theta_table(spot):
-    strikes = range(int(spot - 200), int(spot + 400), 100)
-    data = []
-    for strike in strikes:
-        ce_change = round(random.uniform(30, 70), 2)
-        pe_change = round(random.uniform(10, 50), 2)
-        ce_ratio = round(random.uniform(0.5, 1.5), 2)
-        pc_ratio = round(random.uniform(0.3, 1.2), 2)
-        decay_rate = "PE" if ce_change > pe_change else "CE"
-        data.append({
-            "Strike Price": strike,
-            "P/C Ratio": pc_ratio,
-            "CE Ratio": ce_ratio,
-            "CE Change": ce_change,
-            "PE Change": pe_change,
-            "Decay Rate": decay_rate
-        })
-    return pd.DataFrame(data)
+def fetch_spot(symbol):
+    url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+    try:
+        r = requests.get(url, headers=headers)
+        data = r.json()
+        return float(data["underlyingValue"])
+    except:
+        return None
 
-df_bn = generate_theta_table(spot_bn)
-df_nf = generate_theta_table(spot_nf)
+spot_bn = fetch_spot("BANKNIFTY") or 44850.25
+spot_nf = fetch_spot("NIFTY") or 24948.25
+
+# -------------------------------
+# Option Chain Scraper
+# -------------------------------
+def fetch_option_chain(symbol):
+    url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+    try:
+        r = requests.get(url, headers=headers)
+        data = r.json()["records"]["data"]
+        rows = []
+        for entry in data:
+            strike = entry.get("strikePrice")
+            ce = entry.get("CE", {})
+            pe = entry.get("PE", {})
+            ce_change = ce.get("changeinOpenInterest", 0)
+            pe_change = pe.get("changeinOpenInterest", 0)
+            ce_oi = ce.get("openInterest", 1)
+            pe_oi = pe.get("openInterest", 1)
+            ce_ratio = round(ce_change / ce_oi, 2) if ce_oi else 0
+            pcr = round(pe_oi / ce_oi, 2) if ce_oi else 0
+            decay = "PE" if pe_change > ce_change else "CE"
+            rows.append({
+                "Strike Price": strike,
+                "P/C Ratio": pcr,
+                "CE Ratio": ce_ratio,
+                "CE Change": ce_change,
+                "PE Change": pe_change,
+                "Decay Rate": decay
+            })
+        return pd.DataFrame(rows)
+    except:
+        return pd.DataFrame()
+
+df_bn = fetch_option_chain("BANKNIFTY")
+df_nf = fetch_option_chain("NIFTY")
 
 # -------------------------------
 # Bias Detection
@@ -113,9 +123,10 @@ timestamp = now.strftime("%d-%b-%Y %I:%M:%S %p")
 # -------------------------------
 # Telegram Alert
 # -------------------------------
+send_alert = st.checkbox("📲 Send Telegram Alert")
 if send_alert:
     message = f"""
-📉 *Decay Bias Analyzer*  
+📉 *Live Decay Bias Analyzer*  
 
 🟦 Bank Nifty  
 Spot: {spot_bn}  

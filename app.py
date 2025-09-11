@@ -138,39 +138,6 @@ high_df = df[df["Confidence Score"] >= 75].sort_values("Confidence Score", ascen
 st.dataframe(high_df[["Strike Price", "Decay Side", "Confidence Score", "Strategy", "Levels"]], use_container_width=True)
 
 # -------------------------------
-# Strategy Panel (Below Table)
-# -------------------------------
-st.subheader("📌 Strategy Recommendations")
-
-if active_bias == "PE":
-    st.markdown("""
-#### 🔴 Bearish Bias (Downside)
-- Put options are decaying faster than calls.
-- Consider strategies:
-    - 📌 Bear Put Spread
-    - 📌 Long Put
-    - 📌 CE Shorting (if CE IV is high)
-""")
-elif active_bias == "CE":
-    st.markdown("""
-#### 🟢 Bullish Bias (Upside)
-- Call options are decaying faster than puts.
-- Consider strategies:
-    - 📌 Bull Call Spread
-    - 📌 Long Call
-    - 📌 PE Shorting (if PE IV is high)
-""")
-else:
-    st.markdown("""
-#### 🟡 Neutral Bias (Range-bound)
-- Low decay on both CE and PE.
-- Consider strategies:
-    - 📌 Iron Condor
-    - 📌 Straddle
-    - 📌 Butterfly Spread
-""")
-
-# -------------------------------
 # Footer
 # -------------------------------
 st.markdown("---")

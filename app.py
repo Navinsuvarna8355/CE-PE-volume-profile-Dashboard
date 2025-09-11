@@ -11,52 +11,67 @@ import requests
 BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
 CHANNEL_ID = "@navinnsuvarna"
 
-st.set_page_config(page_title="Decay Bias Analyzer", layout="wide")
-st.title("📉 Decay Bias Analyzer – Tactical Dashboard")
+st.set_page_config(page_title="Dual Decay Bias Analyzer", layout="wide")
+st.title("📉 Decay Bias Analyzer – Bank Nifty & Nifty")
 
 # -------------------------------
 # Inputs
 # -------------------------------
-spot_price = st.number_input("📍 My Spot Price", value=24948.25)
+col1, col2 = st.columns(2)
+with col1:
+    spot_bn = st.number_input("📍 Bank Nifty Spot", value=44850.25)
+with col2:
+    spot_nf = st.number_input("📍 Nifty Spot", value=24948.25)
+
 expiry_date = st.date_input("📅 Expiry Date", value=datetime(2025, 9, 15))
 send_alert = st.checkbox("📲 Send Telegram Alert")
 
 # -------------------------------
-# Generate Theta Table
+# Theta Table Generator
 # -------------------------------
-strike_range = range(int(spot_price - 200), int(spot_price + 400), 100)
-data = []
-for strike in strike_range:
-    ce_theta = round(random.uniform(20, 70), 2)
-    pe_theta = 0  # Assume PE theta is decaying slower
-    ce_change = 0
-    pe_change = 0
-    decay_bias = "PE" if ce_theta > pe_theta else "CE"
-    data.append({
-        "Strike Price": strike,
-        "PE Theta": pe_theta,
-        "CE Theta": ce_theta,
-        "CE Change": ce_change,
-        "PE Change": pe_change,
-        "Decay Bias": decay_bias
-    })
+def generate_theta_table(spot):
+    strikes = range(int(spot - 200), int(spot + 400), 100)
+    data = []
+    for strike in strikes:
+        ce_theta = round(random.uniform(20, 70), 2)
+        pe_theta = 0
+        ce_change = 0
+        pe_change = 0
+        decay_bias = "PE" if ce_theta > pe_theta else "CE"
+        data.append({
+            "Strike Price": strike,
+            "PE Theta": pe_theta,
+            "CE Theta": ce_theta,
+            "CE Change": ce_change,
+            "PE Change": pe_change,
+            "Decay Bias": decay_bias
+        })
+    return pd.DataFrame(data)
 
-df = pd.DataFrame(data)
+df_bn = generate_theta_table(spot_bn)
+df_nf = generate_theta_table(spot_nf)
 
 # -------------------------------
 # Bias Detection
 # -------------------------------
-bias_counts = df["Decay Bias"].value_counts()
-dominant_bias = "PE Decay Active" if bias_counts.get("PE", 0) > bias_counts.get("CE", 0) else "CE Decay Active"
+def detect_bias(df):
+    bias_counts = df["Decay Bias"].value_counts()
+    return "PE Decay Active" if bias_counts.get("PE", 0) > bias_counts.get("CE", 0) else "CE Decay Active"
+
+bias_bn = detect_bias(df_bn)
+bias_nf = detect_bias(df_nf)
 
 # -------------------------------
 # Strategy Recommendation
 # -------------------------------
-strategy = ""
-if dominant_bias == "PE Decay Active":
-    strategy = "✅ Sell Put Options (Short Put)\n✅ Buy Call Options (Long Call)\n✅ Bull Call Spread"
-else:
-    strategy = "✅ Sell Call Options (Short Call)\n✅ Buy Put Options (Long Put)\n✅ Bear Put Spread"
+def recommend_strategy(bias):
+    if bias == "PE Decay Active":
+        return "✅ Sell Put Options (Short Put)\n✅ Buy Call Options (Long Call)\n✅ Bull Call Spread"
+    else:
+        return "✅ Sell Call Options (Short Call)\n✅ Buy Put Options (Long Put)\n✅ Bear Put Spread"
+
+strategy_bn = recommend_strategy(bias_bn)
+strategy_nf = recommend_strategy(bias_nf)
 
 # -------------------------------
 # Timestamp
@@ -71,12 +86,21 @@ timestamp = now.strftime("%d-%b-%Y %I:%M:%S %p")
 if send_alert:
     message = f"""
 📉 *Decay Bias Analyzer*  
-Spot Price: {spot_price}  
 Expiry: {expiry_date.strftime('%d-%b-%Y')}  
-Bias: {dominant_bias}  
-Recommended Strategies:  
-{strategy}  
-Last Updated: {timestamp}
+
+🟦 Bank Nifty  
+Spot: {spot_bn}  
+Bias: {bias_bn}  
+Strategy:  
+{strategy_bn}  
+
+🟥 Nifty  
+Spot: {spot_nf}  
+Bias: {bias_nf}  
+Strategy:  
+{strategy_nf}  
+
+⏱️ Last Updated: {timestamp}
 """
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
@@ -93,13 +117,24 @@ Last Updated: {timestamp}
 # -------------------------------
 # Display Panels
 # -------------------------------
-st.markdown(f"### 📍 My Spot Price: `{spot_price}`")
-st.markdown(f"### 📅 Expiry Date: `{expiry_date.strftime('%d-%b-%Y')}`")
-st.markdown(f"### 📊 Decay Bias: `{dominant_bias}`")
 st.markdown(f"#### ⏱️ Last updated at `{timestamp}`")
 
-st.subheader("📊 Analysis")
-st.dataframe(df, use_container_width=True)
+tab1, tab2 = st.tabs(["🟦 Bank Nifty", "🟥 Nifty"])
 
-st.subheader("🎯 Trading Recommendations")
-st.markdown(strategy)
+with tab1:
+    st.markdown(f"### 📍 Spot Price: `{spot_bn}`")
+    st.markdown(f"### 📊 Decay Bias: `{bias_bn}`")
+    st.markdown(f"### 📅 Expiry Date: `{expiry_date.strftime('%d-%b-%Y')}`")
+    st.subheader("📊 Analysis")
+    st.dataframe(df_bn, use_container_width=True)
+    st.subheader("🎯 Trading Recommendations")
+    st.markdown(strategy_bn)
+
+with tab2:
+    st.markdown(f"### 📍 Spot Price: `{spot_nf}`")
+    st.markdown(f"### 📊 Decay Bias: `{bias_nf}`")
+    st.markdown(f"### 📅 Expiry Date: `{expiry_date.strftime('%d-%b-%Y')}`")
+    st.subheader("📊 Analysis")
+    st.dataframe(df_nf, use_container_width=True)
+    st.subheader("🎯 Trading Recommendations")
+    st.markdown(strategy_nf)

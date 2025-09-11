@@ -32,7 +32,12 @@ def fetch_spot(symbol, fallback):
 # -------------------------------
 # Inputs
 # -------------------------------
-expiry_date = st.date_input("📅 Expiry Date", value=datetime(2025, 9, 15))
+col_exp1, col_exp2 = st.columns(2)
+with col_exp1:
+    expiry_bn = st.date_input("📅 Bank Nifty Expiry", value=datetime(2025, 9, 18))
+with col_exp2:
+    expiry_nf = st.date_input("📅 Nifty Expiry", value=datetime(2025, 9, 19))
+
 send_alert = st.checkbox("📲 Send Telegram Alert")
 
 spot_bn = fetch_spot("BANKNIFTY", fallback=44850.25)
@@ -98,16 +103,17 @@ timestamp = now.strftime("%d-%b-%Y %I:%M:%S %p")
 if send_alert:
     message = f"""
 📉 *Decay Bias Analyzer*  
-Expiry: {expiry_date.strftime('%d-%b-%Y')}  
 
 🟦 Bank Nifty  
 Spot: {spot_bn}  
+Expiry: {expiry_bn.strftime('%d-%b-%Y')}  
 Bias: {bias_bn}  
 Strategy:  
 {strategy_bn}  
 
 🟥 Nifty  
 Spot: {spot_nf}  
+Expiry: {expiry_nf.strftime('%d-%b-%Y')}  
 Bias: {bias_nf}  
 Strategy:  
 {strategy_nf}  
@@ -135,8 +141,8 @@ tab1, tab2 = st.tabs(["🟦 Bank Nifty", "🟥 Nifty"])
 
 with tab1:
     st.markdown(f"### 📍 Spot Price: `{spot_bn}`")
+    st.markdown(f"### 📅 Expiry Date: `{expiry_bn.strftime('%d-%b-%Y')}`")
     st.markdown(f"### 📊 Decay Bias: `{bias_bn}`")
-    st.markdown(f"### 📅 Expiry Date: `{expiry_date.strftime('%d-%b-%Y')}`")
     st.subheader("📊 Analysis")
     st.dataframe(df_bn, use_container_width=True)
     st.subheader("🎯 Trading Recommendations")
@@ -144,8 +150,8 @@ with tab1:
 
 with tab2:
     st.markdown(f"### 📍 Spot Price: `{spot_nf}`")
+    st.markdown(f"### 📅 Expiry Date: `{expiry_nf.strftime('%d-%b-%Y')}`")
     st.markdown(f"### 📊 Decay Bias: `{bias_nf}`")
-    st.markdown(f"### 📅 Expiry Date: `{expiry_date.strftime('%d-%b-%Y')}`")
     st.subheader("📊 Analysis")
     st.dataframe(df_nf, use_container_width=True)
     st.subheader("🎯 Trading Recommendations")

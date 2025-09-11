@@ -1,30 +1,49 @@
 import streamlit as st
 import pandas as pd
+import requests
 from datetime import datetime
 import pytz
 import random
-import requests
 
 # -------------------------------
 # Configurations
 # -------------------------------
 BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
 CHANNEL_ID = "@navinnsuvarna"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive"
+}
 
-st.set_page_config(page_title="Dual Decay Bias Analyzer", layout="wide")
+st.set_page_config(page_title="Decay Bias Analyzer", layout="wide")
 st.title("📉 Decay Bias Analyzer – Bank Nifty & Nifty")
+
+# -------------------------------
+# Spot Price Fetcher
+# -------------------------------
+def fetch_spot(symbol):
+    url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
+    try:
+        response = requests.get(url, headers=HEADERS)
+        data = response.json()
+        return float(data["underlyingValue"])
+    except:
+        return None
 
 # -------------------------------
 # Inputs
 # -------------------------------
-col1, col2 = st.columns(2)
-with col1:
-    spot_bn = st.number_input("📍 Bank Nifty Spot", value=44850.25)
-with col2:
-    spot_nf = st.number_input("📍 Nifty Spot", value=24948.25)
-
 expiry_date = st.date_input("📅 Expiry Date", value=datetime(2025, 9, 15))
 send_alert = st.checkbox("📲 Send Telegram Alert")
+
+spot_bn = fetch_spot("BANKNIFTY")
+spot_nf = fetch_spot("NIFTY")
+
+if not spot_bn or not spot_nf:
+    st.error("⚠️ Failed to fetch live spot prices. Try again later.")
+    st.stop()
 
 # -------------------------------
 # Theta Table Generator

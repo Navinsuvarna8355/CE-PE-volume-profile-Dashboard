@@ -24,10 +24,11 @@ def fetch_option_chain_nse(symbol="NIFTY"):
             "Referer": "https://www.nseindia.com/option-chain"
         }
         session = requests.Session()
-        # Initial request to get cookies
-        session.get("https://www.nseindia.com", headers=headers, timeout=5)
-        time.sleep(1)  # small delay to be polite
-        response = session.get(url, headers=headers, timeout=5)
+        session.headers.update(headers)
+        # Get cookies by visiting homepage
+        session.get("https://www.nseindia.com", timeout=5)
+        time.sleep(1)  # polite delay
+        response = session.get(url, timeout=5)
         response.raise_for_status()
         data = response.json()
         return data["records"]["data"], data["records"]["expiryDates"], data["records"]["underlyingValue"]
@@ -51,14 +52,12 @@ def fetch_option_chain_upstox(symbol="NIFTY"):
         response = requests.get(url, headers=headers, timeout=5)
         response.raise_for_status()
 
-        content_type = response.headers.get("Content-Type", "")
-        if "application/json" in content_type:
+        if "application/json" in response.headers.get("Content-Type", ""):
             data = response.json()
         else:
             st.error(f"Upstox API returned non-JSON response:\n{response.text}")
             return [], [], 0
 
-        # Adjust parsing based on actual Upstox response structure
         records = data.get("records", {})
         chain_data = records.get("data", [])
         expiry_dates = records.get("expiryDates", [])

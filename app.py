@@ -123,17 +123,21 @@ def fetch_yahoo_chain(symbol):
 # Fetch with Fallback
 # -------------------------------
 df_bn = fetch_option_chain("BANKNIFTY")
-if df_bn.empty or df_bn["CE Change"].sum() == 0:
+if df_bn.empty or "Decay Rate" not in df_bn.columns or df_bn["CE Change"].sum() == 0:
+    st.warning("⚠️ NSE data invalid. Using Yahoo fallback for Bank Nifty.")
     df_bn = fetch_yahoo_chain("^NSEBANK")
 
 df_nf = fetch_option_chain("NIFTY")
-if df_nf.empty or df_nf["CE Change"].sum() == 0:
+if df_nf.empty or "Decay Rate" not in df_nf.columns or df_nf["CE Change"].sum() == 0:
+    st.warning("⚠️ NSE data invalid. Using Yahoo fallback for Nifty.")
     df_nf = fetch_yahoo_chain("^NSEI")
 
 # -------------------------------
 # Bias Detection
 # -------------------------------
 def detect_bias(df):
+    if "Decay Rate" not in df.columns or df.empty:
+        return "⚠️ No Data"
     bias_counts = df["Decay Rate"].value_counts()
     return "PE Decay Active" if bias_counts.get("PE", 0) > bias_counts.get("CE", 0) else "CE Decay Active"
 
@@ -144,10 +148,12 @@ bias_nf = detect_bias(df_nf)
 # Strategy Recommendation
 # -------------------------------
 def recommend_strategy(bias):
-    if bias == "PE Decay Active":
+    if "PE" in bias:
         return "✅ Sell Put Options (Short Put)\n✅ Buy Call Options (Long Call)\n✅ Bull Call Spread"
-    else:
+    elif "CE" in bias:
         return "✅ Sell Call Options (Short Call)\n✅ Buy Put Options (Long Put)\n✅ Bear Put Spread"
+    else:
+        return "⚠️ No strategy available"
 
 strategy_bn = recommend_strategy(bias_bn)
 strategy_nf = recommend_strategy(bias_nf)
@@ -214,10 +220,4 @@ with tab1:
 
 with tab2:
     st.markdown(f"### 📍 Spot Price: `{spot_nf}`")
-    st.markdown(f"### 📅 Expiry Date: `{expiry_nf.strftime('%d-%b-%Y')}`")
-    st.markdown(f"### 📊 Decay Bias: `{bias_nf}`")
-    st.subheader("📊 Analysis")
-    st.dataframe(df_nf, use_container_width=True)
-    st.subheader("🎯 Trading Recommendations")
-    for line in strategy_nf.split("\n"):
-        st.markdown(f"- {line}")
+    st.markdown(f"### 📅

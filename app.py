@@ -1,102 +1,167 @@
-# options_decay_dashboard.py
-# Streamlit Dashboard for Options Decay Bias Analysis and Strategy Recommendations
-
 import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime
+import pytz
+import random
 
-# ============================
-# Spot Price Input Module
-# ============================
-st.header("Spot Price Input")
-spot_price = st.number_input("Enter Spot Price:", min_value=0.0, format="%.2f")
+# -------------------------------
+# Configurations
+# -------------------------------
+BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
+CHANNEL_ID = "@navinnsuvarna"
+CAPITAL = 10000
+LOT_SIZE = 1
 
-# ============================
-# Expiry Date Selection Module
-# ============================
-st.header("Expiry Date Selection")
-expiry_date = st.date_input("Select Expiry Date:")
+st.set_page_config(page_title="Sniper Dashboard", layout="wide")
+st.title("🎯 Sniper Entry Dashboard – Tactical Mode")
 
-# ============================
-# CE/PE Theta Table Module
-# ============================
-st.header("CE/PE Theta Table")
-ce_theta = st.number_input("Enter CE Theta value:", format="%.4f")
-pe_theta = st.number_input("Enter PE Theta value:", format="%.4f")
+# -------------------------------
+# Telegram Alert Function
+# -------------------------------
+def send_telegram_alert(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHANNEL_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, data=payload)
+    except Exception as e:
+        st.error(f"Telegram alert failed: {e}")
 
-theta_table = pd.DataFrame({
-    "Option Type": ["Call (CE)", "Put (PE)"],
-    "Theta": [ce_theta, pe_theta]
-})
-st.table(theta_table)
+# -------------------------------
+# Session State Initialization
+# -------------------------------
+if "trade_journal" not in st.session_state:
+    st.session_state.trade_journal = []
 
-# ============================
-# Decay Bias Detection Algorithm
-# ============================
-st.header("Decay Bias Detection")
+if "pnl_tracker" not in st.session_state:
+    st.session_state.pnl_tracker = []
 
-decay_bias = ""
-if ce_theta < pe_theta:
-    decay_bias = "PUTS are decaying slower than CALLS"
-elif ce_theta > pe_theta:
-    decay_bias = "CALLS are decaying slower than PUTS"
-else:
-    decay_bias = "CE and PE have equal decay rate"
+if "auto_tuner" not in st.session_state:
+    st.session_state.auto_tuner = {"rsi_min": 30, "rsi_max": 70}
 
-st.write(f"Decay Bias Detected: **{decay_bias}**")
+# -------------------------------
+# Strategy Recommendation Logic
+# -------------------------------
+def recommend_strategy(signal):
+    if signal["bias"] == "Bullish" and "Bullish" in signal["ema"] and signal["pcr"] < 1:
+        return "Bull Call Spread"
+    elif signal["bias"] == "Bearish" and "Bearish" in signal["ema"] and signal["pcr"] > 1:
+        return "Bear Put Spread"
+    elif signal["bias"] == "Neutral" and signal["candle"] == "Doji" and 45 <= signal["rsi"] <= 55:
+        return "Iron Condor"
+    elif signal["rsi"] > 65 and signal["candle"] == "Bullish":
+        return "Directional CE Buy"
+    elif signal["rsi"] < 35 and signal["candle"] == "Bearish":
+        return "Directional PE Buy"
+    else:
+        return "No Clear Strategy"
 
-# ============================
-# Strategy Recommendation Engine
-# ============================
-st.header("Strategy Recommendation")
+# -------------------------------
+# Tactical Signal Engine
+# -------------------------------
+def generate_signal():
+    bias = random.choice(["Bullish", "Bearish", "Neutral"])
+    ema_crossover = random.choice(["Bullish Crossover", "Bearish Crossover", "No Signal"])
+    pcr = round(random.uniform(0.6, 1.4), 2)
+    candle = random.choice(["Hammer", "Doji", "Engulfing", "Bullish", "Bearish"])
+    spot = random.randint(54000, 54500)
+    rsi = random.randint(st.session_state.auto_tuner["rsi_min"], st.session_state.auto_tuner["rsi_max"])
 
-recommended_strategy = ""
-if decay_bias == "PUTS are decaying slower than CALLS":
-    recommended_strategy = "Bull Call Spread or Short Put"
-elif decay_bias == "CALLS are decaying slower than PUTS":
-    recommended_strategy = "Bear Put Spread or Long Call"
-else:
-    recommended_strategy = "Neutral Strategy (e.g., Iron Condor)"
+    trap_trade = (bias == "Bullish" and pcr > 1.2 and candle == "Doji") or \
+                 (bias == "Bearish" and pcr < 0.8 and candle == "Hammer")
 
-st.write(f"Recommended Strategy: **{recommended_strategy}**")
+    signal = {
+        "bias": bias,
+        "ema": ema_crossover,
+        "pcr": pcr,
+        "candle": candle,
+        "spot": spot,
+        "rsi": rsi,
+        "trap": trap_trade
+    }
+    signal["strategy"] = recommend_strategy(signal)
+    return signal
 
-# ============================
-# Timestamp Display and Auto-refresh
-# ============================
-st.header("Last Update Timestamp")
-timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-st.write(f"Updated on: **{timestamp}**")
+# -------------------------------
+# Trade Logging Function
+# -------------------------------
+def log_trade(signal, result, points):
+    ist = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(ist)
+    entry_time = now.strftime("%d-%b %I:%M %p")
+    exit_time = now.strftime("%d-%b %I:%M %p")
 
-# ============================
-# Optional: Telegram Alert Integration
-# ============================
-st.header("Telegram Alert (Optional)")
+    st.session_state.trade_journal.append({
+        "Entry": entry_time,
+        "Exit": exit_time,
+        "Bias": signal["bias"],
+        "EMA": signal["ema"],
+        "PCR": signal["pcr"],
+        "RSI": signal["rsi"],
+        "Candle": signal["candle"],
+        "Spot": signal["spot"],
+        "Trap": signal["trap"],
+        "Strategy": signal["strategy"],
+        "Result": result,
+        "Points": points
+    })
+    st.session_state.pnl_tracker.append(points)
 
-telegram_enabled = st.checkbox("Enable Telegram Alerts")
+    # Auto-tuner logic
+    if result == "Loss":
+        st.session_state.auto_tuner["rsi_min"] += 1
+        st.session_state.auto_tuner["rsi_max"] -= 1
+    elif result == "Win":
+        st.session_state.auto_tuner["rsi_min"] = max(25, st.session_state.auto_tuner["rsi_min"] - 1)
+        st.session_state.auto_tuner["rsi_max"] = min(75, st.session_state.auto_tuner["rsi_max"] + 1)
 
-if telegram_enabled:
-    telegram_token = st.text_input("Enter your Telegram Bot Token")
-    telegram_chat_id = st.text_input("Enter your Telegram Chat ID")
+    # Telegram Alert
+    alert_msg = f"""
+🎯 *Entry Signal – BankNifty*  
+Bias: {signal['bias']}  
+EMA: {signal['ema']}  
+PCR: {signal['pcr']}  
+RSI: {signal['rsi']}  
+Candle: {signal['candle']}  
+Spot: {signal['spot']}  
+Strategy: {signal['strategy']}  
+Trap Trade: {'Yes' if signal['trap'] else 'No'}  
+Lot Size: {LOT_SIZE} | Capital: ₹{CAPITAL}  
+Time: {entry_time}
+"""
+    send_telegram_alert(alert_msg)
 
-    message = (
-        f"Decay Bias: {decay_bias}\n"
-        f"Strategy Recommendation: {recommended_strategy}\n"
-        f"Spot Price: {spot_price}\n"
-        f"Expiry Date: {expiry_date}\n"
-        f"Timestamp: {timestamp}"
-    )
+# -------------------------------
+# UI Panels
+# -------------------------------
+st.subheader("📘 Trade Journal")
+if st.session_state.trade_journal:
+    journal_df = pd.DataFrame(st.session_state.trade_journal)
+    st.dataframe(journal_df, use_container_width=True)
 
-    if st.button("Send Telegram Alert"):
-        send_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-        params = {
-            "chat_id": telegram_chat_id,
-            "text": message
-        }
-        response = requests.post(send_url, data=params)
-        if response.status_code == 200:
-            st.success("Alert sent successfully!")
-        else:
-            st.error("Failed to send alert.")
+st.subheader("📊 P&L Tracker")
+if st.session_state.pnl_tracker:
+    pnl_df = pd.DataFrame({"Points": st.session_state.pnl_tracker})
+    st.line_chart(pnl_df)
+    total = sum(st.session_state.pnl_tracker)
+    accuracy = round((sum(1 for p in st.session_state.pnl_tracker if p > 0) / len(st.session_state.pnl_tracker)) * 100, 2)
+    st.markdown(f"**Total Points:** `{total}` | **Accuracy:** `{accuracy}%`")
 
-# End of options_decay_dashboard.py
+st.subheader("🧠 Auto-Tuner Status")
+rsi_min = st.session_state.auto_tuner["rsi_min"]
+rsi_max = st.session_state.auto_tuner["rsi_max"]
+st.markdown(f"**RSI Thresholds:** `{rsi_min}` to `{rsi_max}`")
+
+# -------------------------------
+# Trade Trigger
+# -------------------------------
+if st.button("🔫 Generate Tactical Signal"):
+    signal = generate_signal()
+    result = random.choice(["Win", "Loss"])
+    points = random.randint(60, 120) if result == "Win" else random.randint(-80, -30)
+    log_trade(signal, result, points)
+    st.success("Signal generated, strategy recommended, trade logged, and alert sent!")

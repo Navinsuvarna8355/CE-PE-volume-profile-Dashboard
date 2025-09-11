@@ -4,6 +4,7 @@ import requests
 from datetime import datetime
 import pytz
 import random
+import time
 
 # -------------------------------
 # Streamlit Config
@@ -12,19 +13,22 @@ st.set_page_config(page_title="Sniper Entry Dashboard", layout="wide")
 st.title("🎯 Sniper Entry Dashboard – Nifty & BankNifty")
 
 # -------------------------------
-# NSE Option Chain Fetch
+# NSE Option Chain Fetch (Improved)
 # -------------------------------
 def fetch_option_chain_nse(symbol="NIFTY"):
     try:
         url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
         headers = {
-            "User -Agent": "Mozilla/5.0",
+            "User -Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://www.nseindia.com"
+            "Referer": "https://www.nseindia.com/option-chain"
         }
         session = requests.Session()
-        session.get("https://www.nseindia.com", headers=headers)
-        response = session.get(url, headers=headers)
+        # Initial request to get cookies
+        session.get("https://www.nseindia.com", headers=headers, timeout=5)
+        time.sleep(1)  # small delay to be polite
+        response = session.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
         data = response.json()
         return data["records"]["data"], data["records"]["expiryDates"], data["records"]["underlyingValue"]
     except Exception as e:
@@ -35,31 +39,31 @@ def fetch_option_chain_nse(symbol="NIFTY"):
 # Upstox Option Chain Fetch (Fallback)
 # -------------------------------
 def fetch_option_chain_upstox(symbol="NIFTY"):
-    # Replace these with your Upstox credentials
     UPSTOX_API_KEY = "your_upstox_api_key"
-    UPSTOX_API_SECRET = "your_upstox_api_secret"
-    UPSTOX_ACCESS_TOKEN = "your_upstox_access_token"  # You must generate this via OAuth flow
+    UPSTOX_ACCESS_TOKEN = "your_upstox_access_token"
 
     try:
-        # Upstox API endpoint for option chain (example endpoint, check Upstox docs)
-        # Note: Upstox API may have different endpoint and parameters
         url = f"https://api.upstox.com/index/option_chain?symbol={symbol}"
         headers = {
             "apiKey": UPSTOX_API_KEY,
             "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}"
         }
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=5)
         response.raise_for_status()
-        data = response.json()
 
-        # Parse Upstox data to match NSE format
-        # This is a simplified example; adjust according to actual Upstox response structure
+        content_type = response.headers.get("Content-Type", "")
+        if "application/json" in content_type:
+            data = response.json()
+        else:
+            st.error(f"Upstox API returned non-JSON response:\n{response.text}")
+            return [], [], 0
+
+        # Adjust parsing based on actual Upstox response structure
         records = data.get("records", {})
         chain_data = records.get("data", [])
         expiry_dates = records.get("expiryDates", [])
         underlying_value = records.get("underlyingValue", 0)
 
-        # Return in NSE-like format
         return chain_data, expiry_dates, underlying_value
 
     except Exception as e:

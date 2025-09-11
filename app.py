@@ -7,6 +7,7 @@ import pytz
 import random
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import time
 
 # -------------------------------
 # Streamlit Config
@@ -76,7 +77,11 @@ with st.sidebar:
 
 # Auto-refresh logic
 if auto_refresh and not fetch_now:
-    st.rerun(refresh_interval)
+    with st.empty():
+        for seconds in range(refresh_interval, 0, -1):
+            st.write(f"Refreshing in {seconds} seconds...")
+            time.sleep(1)
+    st.rerun()
 
 if fetch_now:
     st.cache_data.clear()
@@ -91,9 +96,16 @@ col2.metric("Expiry Date", expiry_list[0] if expiry_list else "N/A")
 
 if chain_data:
     df_temp = pd.DataFrame(chain_data)
-    pe_decay = df_temp["PE"].apply(lambda x: x.get("theta", 0))
-    ce_decay = df_temp["CE"].apply(lambda x: x.get("theta", 0))
-    decay_bias = "CE Decay Active" if ce_decay.mean() < pe_decay.mean() else "PE Decay Active"
+    pe_decay_theta = df_temp["PE"].apply(lambda x: x.get("theta", 0))
+    ce_decay_theta = df_temp["CE"].apply(lambda x: x.get("theta", 0))
+    
+    # Calculate average decay to determine bias
+    if pe_decay_theta.mean() > ce_decay_theta.mean():
+        decay_bias = "PE Decay Active"
+    elif ce_decay_theta.mean() > pe_decay_theta.mean():
+        decay_bias = "CE Decay Active"
+    else:
+        decay_bias = "Neutral/No Clear Bias"
 else:
     decay_bias = "N/A"
 

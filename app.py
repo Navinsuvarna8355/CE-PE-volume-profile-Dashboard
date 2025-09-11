@@ -1,105 +1,102 @@
+# options_decay_dashboard.py
+# Streamlit Dashboard for Options Decay Bias Analysis and Strategy Recommendations
+
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-import pytz
-import random
 import requests
+from datetime import datetime
 
-# -------------------------------
-# Configurations
-# -------------------------------
-BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
-CHANNEL_ID = "@navinnsuvarna"
+# ============================
+# Spot Price Input Module
+# ============================
+st.header("Spot Price Input")
+spot_price = st.number_input("Enter Spot Price:", min_value=0.0, format="%.2f")
 
-st.set_page_config(page_title="Decay Bias Analyzer", layout="wide")
-st.title("📉 Decay Bias Analyzer – Tactical Dashboard")
+# ============================
+# Expiry Date Selection Module
+# ============================
+st.header("Expiry Date Selection")
+expiry_date = st.date_input("Select Expiry Date:")
 
-# -------------------------------
-# Inputs
-# -------------------------------
-spot_price = st.number_input("📍 My Spot Price", value=24948.25)
-expiry_date = st.date_input("📅 Expiry Date", value=datetime(2025, 9, 15))
-send_alert = st.checkbox("📲 Send Telegram Alert")
+# ============================
+# CE/PE Theta Table Module
+# ============================
+st.header("CE/PE Theta Table")
+ce_theta = st.number_input("Enter CE Theta value:", format="%.4f")
+pe_theta = st.number_input("Enter PE Theta value:", format="%.4f")
 
-# -------------------------------
-# Generate Theta Table
-# -------------------------------
-strike_range = range(int(spot_price - 200), int(spot_price + 400), 100)
-data = []
-for strike in strike_range:
-    ce_theta = round(random.uniform(20, 70), 2)
-    pe_theta = 0  # Assume PE theta is decaying slower
-    ce_change = 0
-    pe_change = 0
-    decay_bias = "PE" if ce_theta > pe_theta else "CE"
-    data.append({
-        "Strike Price": strike,
-        "PE Theta": pe_theta,
-        "CE Theta": ce_theta,
-        "CE Change": ce_change,
-        "PE Change": pe_change,
-        "Decay Bias": decay_bias
-    })
+theta_table = pd.DataFrame({
+    "Option Type": ["Call (CE)", "Put (PE)"],
+    "Theta": [ce_theta, pe_theta]
+})
+st.table(theta_table)
 
-df = pd.DataFrame(data)
+# ============================
+# Decay Bias Detection Algorithm
+# ============================
+st.header("Decay Bias Detection")
 
-# -------------------------------
-# Bias Detection
-# -------------------------------
-bias_counts = df["Decay Bias"].value_counts()
-dominant_bias = "PE Decay Active" if bias_counts.get("PE", 0) > bias_counts.get("CE", 0) else "CE Decay Active"
-
-# -------------------------------
-# Strategy Recommendation
-# -------------------------------
-strategy = ""
-if dominant_bias == "PE Decay Active":
-    strategy = "✅ Sell Put Options (Short Put)\n✅ Buy Call Options (Long Call)\n✅ Bull Call Spread"
+decay_bias = ""
+if ce_theta < pe_theta:
+    decay_bias = "PUTS are decaying slower than CALLS"
+elif ce_theta > pe_theta:
+    decay_bias = "CALLS are decaying slower than PUTS"
 else:
-    strategy = "✅ Sell Call Options (Short Call)\n✅ Buy Put Options (Long Put)\n✅ Bear Put Spread"
+    decay_bias = "CE and PE have equal decay rate"
 
-# -------------------------------
-# Timestamp
-# -------------------------------
-ist = pytz.timezone("Asia/Kolkata")
-now = datetime.now(ist)
-timestamp = now.strftime("%d-%b-%Y %I:%M:%S %p")
+st.write(f"Decay Bias Detected: **{decay_bias}**")
 
-# -------------------------------
-# Telegram Alert
-# -------------------------------
-if send_alert:
-    message = f"""
-📉 *Decay Bias Analyzer*  
-Spot Price: {spot_price}  
-Expiry: {expiry_date.strftime('%d-%b-%Y')}  
-Bias: {dominant_bias}  
-Recommended Strategies:  
-{strategy}  
-Last Updated: {timestamp}
-"""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHANNEL_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    try:
-        requests.post(url, data=payload)
-        st.success("Telegram alert sent!")
-    except Exception as e:
-        st.error(f"Telegram alert failed: {e}")
+# ============================
+# Strategy Recommendation Engine
+# ============================
+st.header("Strategy Recommendation")
 
-# -------------------------------
-# Display Panels
-# -------------------------------
-st.markdown(f"### 📍 My Spot Price: `{spot_price}`")
-st.markdown(f"### 📅 Expiry Date: `{expiry_date.strftime('%d-%b-%Y')}`")
-st.markdown(f"### 📊 Decay Bias: `{dominant_bias}`")
-st.markdown(f"#### ⏱️ Last updated at `{timestamp}`")
+recommended_strategy = ""
+if decay_bias == "PUTS are decaying slower than CALLS":
+    recommended_strategy = "Bull Call Spread or Short Put"
+elif decay_bias == "CALLS are decaying slower than PUTS":
+    recommended_strategy = "Bear Put Spread or Long Call"
+else:
+    recommended_strategy = "Neutral Strategy (e.g., Iron Condor)"
 
-st.subheader("📊 Analysis")
-st.dataframe(df, use_container_width=True)
+st.write(f"Recommended Strategy: **{recommended_strategy}**")
 
-st.subheader("🎯 Trading Recommendations")
-st.markdown(strategy)
+# ============================
+# Timestamp Display and Auto-refresh
+# ============================
+st.header("Last Update Timestamp")
+timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+st.write(f"Updated on: **{timestamp}**")
+
+# ============================
+# Optional: Telegram Alert Integration
+# ============================
+st.header("Telegram Alert (Optional)")
+
+telegram_enabled = st.checkbox("Enable Telegram Alerts")
+
+if telegram_enabled:
+    telegram_token = st.text_input("Enter your Telegram Bot Token")
+    telegram_chat_id = st.text_input("Enter your Telegram Chat ID")
+
+    message = (
+        f"Decay Bias: {decay_bias}\n"
+        f"Strategy Recommendation: {recommended_strategy}\n"
+        f"Spot Price: {spot_price}\n"
+        f"Expiry Date: {expiry_date}\n"
+        f"Timestamp: {timestamp}"
+    )
+
+    if st.button("Send Telegram Alert"):
+        send_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+        params = {
+            "chat_id": telegram_chat_id,
+            "text": message
+        }
+        response = requests.post(send_url, data=params)
+        if response.status_code == 200:
+            st.success("Alert sent successfully!")
+        else:
+            st.error("Failed to send alert.")
+
+# End of options_decay_dashboard.py

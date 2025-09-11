@@ -159,7 +159,8 @@ with tab1:
     st.subheader("📊 Analysis")
     st.dataframe(df_bn, use_container_width=True)
     st.subheader("🎯 Trading Recommendations")
-    st.markdown(strategy_bn)
+    for line in strategy_bn.split("\n"):
+        st.markdown(f"- {line}")
 
 with tab2:
     st.markdown(f"### 📍 Spot Price: `{spot_nf}`")
@@ -168,4 +169,5 @@ with tab2:
     st.subheader("📊 Analysis")
     st.dataframe(df_nf, use_container_width=True)
     st.subheader("🎯 Trading Recommendations")
-    st.markdown(strategy_nf)
+    for line in strategy_nf.split("\n"):
+        st.markdown(f"- {line}")

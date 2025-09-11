@@ -1,142 +1,140 @@
+# ===============================================================
+#  Nifty Options Decay Bias Streamlit Dashboard
+# ===============================================================
+
 import streamlit as st
 import pandas as pd
 import requests
+import numpy as np
+import matplotlib.pyplot as plt
 from datetime import datetime
-import pytz
-import random
+import asyncio
 
-# -------------------------------
-# Configurations
-# -------------------------------
-BOT_TOKEN = "8010130215:AAGEqfShscPDwlnXj1bKHTzUish_EE"
-CHANNEL_ID = "@navinnsuvarna"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# -- Constants and Settings --------------------------------------
+TELEGRAM_BOT_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "")
+TELEGRAM_USER_ID = st.secrets.get("TELEGRAM_USER_ID", "")
 
-st.set_page_config(page_title="Live Decay Analyzer", layout="wide")
-st.title("📉 Live Decay Bias Analyzer – Bank Nifty & Nifty")
+st.set_page_config(page_title="Nifty Options Decay Bias", layout="wide")
 
-# -------------------------------
-# Spot Price Fetcher
-# -------------------------------
-def fetch_spot(symbol):
-    url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}"
+# ===============================================================
+#  Helper Functions
+# ===============================================================
+
+def get_live_nifty_price():
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
     try:
-        response = requests.get(url, headers=HEADERS)
-        data = response.json()
-        return float(data["underlyingValue"])
-    except:
+        res = requests.get(url, headers=headers, timeout=10)
+        res.raise_for_status()
+        return res.json()['records']['underlyingValue']
+    except Exception:
         return None
 
-# -------------------------------
-# Inputs
-# -------------------------------
-expiry_date = st.date_input("📅 Expiry Date", value=datetime(2025, 9, 18))
-send_alert = st.checkbox("📲 Send Telegram Alert")
+@st.cache_data(ttl=60)
+def fetch_option_chain_data():
+    # Returns the entire option chain JSON, refreshed every 1 min
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
+    res = requests.get(url, headers=headers, timeout=10)
+    res.raise_for_status()
+    return res.json()['records']['data']
 
-spot_banknifty = fetch_spot("BANKNIFTY")
-spot_nifty = fetch_spot("NIFTY")
+def get_expiry_dates(option_chain_data):
+    return sorted(set(item['expiryDate'] for item in option_chain_data))
 
-if not spot_banknifty or not spot_nifty:
-    st.error("⚠️ Failed to fetch live spot prices. Try again later.")
-    st.stop()
+def build_theta_table(option_chain, expiry):
+    rows = []
+    for item in option_chain:
+        if item['expiryDate'] == expiry:
+            strike = item['strikePrice']
+            ce = item.get('CE', {})
+            pe = item.get('PE', {})
+            ce_theta = ce.get('theta', np.nan)
+            pe_theta = pe.get('theta', np.nan)
+            rows.append({
+                'Strike': strike,
+                'CE Theta': ce_theta,
+                'PE Theta': pe_theta,
+                'Decay Bias': (ce_theta - pe_theta) if np.isfinite(ce_theta) and np.isfinite(pe_theta) else np.nan,
+            })
+    df = pd.DataFrame(rows).sort_values('Strike')
+    df['Bias Direction'] = np.where(df['Decay Bias'] > 0, 'CE', 'PE')
+    return df
 
-# -------------------------------
-# Theta Table Generator
-# -------------------------------
-def generate_theta_table(spot):
-    strikes = range(int(spot - 200), int(spot + 400), 100)
-    data = []
-    for strike in strikes:
-        ce_theta = round(random.uniform(20, 70), 2)
-        pe_theta = 0
-        decay_bias = "PE" if ce_theta > pe_theta else "CE"
-        data.append({
-            "Strike": strike,
-            "PE Theta": pe_theta,
-            "CE Theta": ce_theta,
-            "Decay Bias": decay_bias
-        })
-    return pd.DataFrame(data)
+def generate_ce_theta_chart(df):
+    fig, ax = plt.subplots(figsize=(10,5))
+    plotted = ax.plot(df['Strike'], df['CE Theta'], marker='o', color='blue', label='CE Theta')
+    ax.set_xlabel("Strike Price")
+    ax.set_ylabel("Theta")
+    ax.set_title("CE Theta Decay Across Strikes")
+    ax.grid(True)
+    ax.legend()
+    return fig
 
-df_banknifty = generate_theta_table(spot_banknifty)
-df_nifty = generate_theta_table(spot_nifty)
-
-# -------------------------------
-# Bias Detection
-# -------------------------------
-def detect_bias(df):
-    bias_counts = df["Decay Bias"].value_counts()
-    return "PE Decay Active" if bias_counts.get("PE", 0) > bias_counts.get("CE", 0) else "CE Decay Active"
-
-bias_banknifty = detect_bias(df_banknifty)
-bias_nifty = detect_bias(df_nifty)
-
-# -------------------------------
-# Strategy Recommendation
-# -------------------------------
-def recommend_strategy(bias):
-    if bias == "PE Decay Active":
-        return "✅ Short Put\n✅ Long Call\n✅ Bull Call Spread"
+def recommend_strategy(df):
+    ce_bias = (df['Bias Direction'] == 'CE').sum()
+    pe_bias = (df['Bias Direction'] == 'PE').sum()
+    if ce_bias > pe_bias:
+        return "PE Short Strategy favored (CE decay is higher)"
+    elif pe_bias > ce_bias:
+        return "CE Short Strategy favored (PE decay is higher)"
     else:
-        return "✅ Short Call\n✅ Long Put\n✅ Bear Put Spread"
+        return "Neutral Bias – Consider Iron Condor/Straddle"
 
-strategy_banknifty = recommend_strategy(bias_banknifty)
-strategy_nifty = recommend_strategy(bias_nifty)
+async def send_telegram_alert(message):
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID:
+        import aiohttp
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_USER_ID, "text": message}
+        async with aiohttp.ClientSession() as session:
+            await session.post(url, data=payload)
 
-# -------------------------------
-# Timestamp
-# -------------------------------
-ist = pytz.timezone("Asia/Kolkata")
-timestamp = datetime.now(ist).strftime("%d-%b-%Y %I:%M:%S %p")
+# ===============================================================
+#  Streamlit Layout and Dashboard Structure
+# ===============================================================
 
-# -------------------------------
-# Telegram Alert
-# -------------------------------
-if send_alert:
-    message = f"""
-📉 *Live Decay Bias Analyzer*  
-Expiry: {expiry_date.strftime('%d-%b-%Y')}  
-🟦 Bank Nifty  
-Spot: {spot_banknifty}  
-Bias: {bias_banknifty}  
-Strategy:  
-{strategy_banknifty}  
+st.title("🔍 Nifty Options Decay Bias Dashboard")
 
-🟥 Nifty  
-Spot: {spot_nifty}  
-Bias: {bias_nifty}  
-Strategy:  
-{strategy_nifty}  
+# Sidebar: Live Metrics and Controls
+with st.sidebar:
+    spot_price = get_live_nifty_price()
+    st.metric("Live Nifty Spot", f"{spot_price:.2f}" if spot_price else "N/A")
+    last_update = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    st.markdown(f"**Last Updated:** {last_update}")
+    telegram_enabled = st.checkbox("Enable Telegram Alerts")
+    auto_refresh = st.checkbox("Auto-refresh (60s)", value=True)
+    # can add st_autorefresh(interval=60000) here per Section 9.2
 
-⏱️ Last Updated: {timestamp}
-"""
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHANNEL_ID, "text": message, "parse_mode": "Markdown"}
-        )
-        st.success("Telegram alert sent!")
-    except Exception as e:
-        st.error(f"Telegram alert failed: {e}")
+# Main: Expiry Selector and Data Loading
+option_chain_data = fetch_option_chain_data()
+expiry_options = get_expiry_dates(option_chain_data)
+selected_expiry = st.selectbox("Select Expiry Date", expiry_options)
 
-# -------------------------------
-# Display Panels
-# -------------------------------
-st.markdown(f"### ⏱️ Last updated at `{timestamp}`")
+theta_df = build_theta_table(option_chain_data, selected_expiry)
 
-col1, col2 = st.columns(2)
-with col1:
-    st.subheader("🟦 Bank Nifty")
-    st.markdown(f"**Spot:** `{spot_banknifty}`")
-    st.markdown(f"**Decay Bias:** `{bias_banknifty}`")
-    st.dataframe(df_banknifty, use_container_width=True)
-    st.subheader("🎯 Strategy")
-    st.markdown(strategy_banknifty)
+# Strategy Recommendation Engine
+average_bias = theta_df['Decay Bias'].mean()
+strategy = recommend_strategy(theta_df)
+st.success(f"🧭 Strategy Recommendation: {strategy}")
 
-with col2:
-    st.subheader("🟥 Nifty")
-    st.markdown(f"**Spot:** `{spot_nifty}`")
-    st.markdown(f"**Decay Bias:** `{bias_nifty}`")
-    st.dataframe(df_nifty, use_container_width=True)
-    st.subheader("🎯 Strategy")
-    st.markdown(strategy_nifty)
+if telegram_enabled:
+    asyncio.run(send_telegram_alert(f"Nifty Decay Bias: Strategy - {strategy} @ {last_update}"))
+
+# Tabs Layout: DataTable and Chart
+tab1, tab2 = st.tabs(["📊 CE/PE Theta Table", "📈 CE Theta Chart"])
+with tab1:
+    st.dataframe(
+        theta_df.style.background_gradient(subset=["Decay Bias"], cmap="coolwarm"), 
+        use_container_width=True
+    )
+with tab2:
+    fig = generate_ce_theta_chart(theta_df)
+    st.pyplot(fig)
+
+st.caption("NB: All calculations use latest available NSE data; theoretical Greeks may show as NaN for illiquid strikes.")
+
+# Optional: Further extension for advanced filters, historical decay curves, or backtesting engine
+
+# ===============================================================
+# END OF FILE
+# ===============================================================

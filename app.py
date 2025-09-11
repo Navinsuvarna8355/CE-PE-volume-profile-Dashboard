@@ -5,6 +5,8 @@ import yfinance as yf
 from datetime import datetime
 import pytz
 import random
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # -------------------------------
 # Streamlit Config
@@ -17,7 +19,6 @@ st.title("🎯 Sniper Entry Dashboard – Nifty & BankNifty")
 # -------------------------------
 @st.cache_data(ttl=300)
 def fetch_option_chain(symbol="NIFTY"):
-    # Map NSE symbols to Yahoo Finance symbols
     yahoo_symbol_map = {
         "NIFTY": "^NSEI",
         "BANKNIFTY": "^NSEBANK"
@@ -126,7 +127,18 @@ with tab1:
         st.warning("No option chain data available to display.")
 
 with tab2:
-    st.info("Theta Chart coming soon. Placeholder for visualization.")
+    if chain_data:
+        strikes = [item['strikePrice'] for item in chain_data]
+        ce_theta = [item.get('CE', {}).get('theta', 0) for item in chain_data]
+        pe_theta = [item.get('PE', {}).get('theta', 0) for item in chain_data]
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=strikes, y=ce_theta, mode='lines+markers', name='CE Theta'))
+        fig.add_trace(go.Scatter(x=strikes, y=pe_theta, mode='lines+markers', name='PE Theta'))
+        fig.update_layout(title='Theta vs. Strike Price', xaxis_title='Strike Price', yaxis_title='Theta', legend_title='Option Type')
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No option chain data to generate the Theta Chart.")
 
 # --- Trading Recommendations Section ---
 st.header("Trading Recommendations")

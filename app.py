@@ -31,7 +31,7 @@ def fetch_spot(symbol, fallback):
         return fallback
 
 # -------------------------------
-# Expiry Calculator (Last Tuesday of Month)
+# Expiry Calculators
 # -------------------------------
 def get_last_tuesday(year, month):
     last_day = calendar.monthrange(year, month)[1]
@@ -41,12 +41,16 @@ def get_last_tuesday(year, month):
             return date
     return datetime(year, month, last_day)
 
+def get_next_tuesday(today):
+    days_ahead = (1 - today.weekday() + 7) % 7
+    return today + timedelta(days=days_ahead)
+
 # -------------------------------
 # Inputs
 # -------------------------------
 today = datetime.now()
 expiry_bn = get_last_tuesday(today.year, today.month)
-expiry_nf = get_last_tuesday(today.year, today.month)
+expiry_nf = get_next_tuesday(today)
 send_alert = st.checkbox("📲 Send Telegram Alert")
 
 spot_bn = fetch_spot("BANKNIFTY", fallback=44850.25)

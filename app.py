@@ -220,4 +220,4 @@ with tab1:
 
 with tab2:
     st.markdown(f"### 📍 Spot Price: `{spot_nf}`")
-    st.markdown(f"### 📅
+    st.markdown(f"### 📅 Expiry Date: `{expiry_nf.strftime('%d-%b-%Y')}`")

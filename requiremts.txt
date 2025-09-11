@@ -1,5 +1,6 @@
-streamlit>=1.25.0
-pandas>=1.5.3
-requests>=2.31.0
-plotly>=5.18.0
-pytz>=2023.3
+streamlit~=1.30
+pandas
+numpy
+pystagram         # or the library you’re using for Instagram
+requests
+# Add others as required for Bank Nifty, Nifty decay modules; avoid direct version pinning unless critical
